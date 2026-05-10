@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { AgentTeam, AgentTeamMember, AgentProfile, addAgentTeamMember, getAgentProfiles } from '@/lib/api'
+import { AgentTeamMember, AgentProfile, addAgentTeamMember } from '@/lib/api'
 
 interface AddTeamMemberFormProps {
   teamId: string
@@ -18,6 +18,7 @@ export function AddTeamMemberForm({
 }: AddTeamMemberFormProps) {
   const [selectedProfileId, setSelectedProfileId] = useState('')
   const [role, setRole] = useState('member')
+  const [position, setPosition] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -29,14 +30,17 @@ export function AddTeamMemberForm({
     setError(null)
 
     try {
+      const positionNum = position.trim() !== '' ? parseInt(position, 10) : undefined
       const member = await addAgentTeamMember(teamId, {
         profile_id: selectedProfileId,
         member_role: role,
+        position: positionNum,
       })
 
       onAdd(member)
       setSelectedProfileId('')
       setRole('member')
+      setPosition('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add member')
     } finally {
@@ -54,7 +58,7 @@ export function AddTeamMemberForm({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">
             Agent Profile
@@ -87,6 +91,19 @@ export function AddTeamMemberForm({
             <option value="member">Member</option>
             <option value="reviewer">Reviewer</option>
           </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Position
+          </label>
+          <input
+            type="number"
+            value={position}
+            onChange={(e) => setPosition(e.target.value)}
+            placeholder="0"
+            className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+          />
         </div>
       </div>
 
