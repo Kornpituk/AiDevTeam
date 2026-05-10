@@ -51,6 +51,11 @@ func (h *AgentRunHandler) CreateAgentRun(w http.ResponseWriter, r *http.Request)
 
 	run.TaskID = taskID
 
+	if run.TeamID != "" && !isValidUUID(run.TeamID) {
+		respondError(w, http.StatusBadRequest, "Invalid team ID")
+		return
+	}
+
 	if run.Status == "" {
 		run.Status = "draft"
 	}

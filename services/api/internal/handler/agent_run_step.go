@@ -50,6 +50,11 @@ func (h *AgentRunStepHandler) CreateRunStep(w http.ResponseWriter, r *http.Reque
 
 	step.RunID = runID
 
+	if step.ProfileID != "" && !isValidUUID(step.ProfileID) {
+		respondError(w, http.StatusBadRequest, "Invalid profile ID")
+		return
+	}
+
 	if step.StepType == "" {
 		respondError(w, http.StatusBadRequest, "Step type is required")
 		return
