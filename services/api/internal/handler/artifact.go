@@ -7,14 +7,18 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
-	"github.com/Kornpituk/AiDevTeam/services/api/internal/repository"
 )
 
-type ArtifactHandler struct {
-	artifactRepo *repository.ArtifactRepository
+type ArtifactRepository interface {
+	Create(artifact *model.TaskArtifact) error
+	GetByTaskID(taskID int) ([]model.TaskArtifact, error)
 }
 
-func NewArtifactHandler(artifactRepo *repository.ArtifactRepository) *ArtifactHandler {
+type ArtifactHandler struct {
+	artifactRepo ArtifactRepository
+}
+
+func NewArtifactHandler(artifactRepo ArtifactRepository) *ArtifactHandler {
 	return &ArtifactHandler{artifactRepo: artifactRepo}
 }
 

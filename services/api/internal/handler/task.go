@@ -7,14 +7,20 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
-	"github.com/Kornpituk/AiDevTeam/services/api/internal/repository"
 )
 
-type TaskHandler struct {
-	taskRepo *repository.TaskRepository
+type TaskRepository interface {
+	Create(task *model.Task) error
+	GetAll() ([]model.Task, error)
+	GetByID(id int) (*model.Task, error)
+	UpdateStatus(id int, status string) error
 }
 
-func NewTaskHandler(taskRepo *repository.TaskRepository) *TaskHandler {
+type TaskHandler struct {
+	taskRepo TaskRepository
+}
+
+func NewTaskHandler(taskRepo TaskRepository) *TaskHandler {
 	return &TaskHandler{taskRepo: taskRepo}
 }
 

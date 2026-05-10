@@ -7,14 +7,18 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
-	"github.com/Kornpituk/AiDevTeam/services/api/internal/repository"
 )
 
-type EventHandler struct {
-	eventRepo *repository.EventRepository
+type EventRepository interface {
+	Create(event *model.TaskEvent) error
+	GetByTaskID(taskID int) ([]model.TaskEvent, error)
 }
 
-func NewEventHandler(eventRepo *repository.EventRepository) *EventHandler {
+type EventHandler struct {
+	eventRepo EventRepository
+}
+
+func NewEventHandler(eventRepo EventRepository) *EventHandler {
 	return &EventHandler{eventRepo: eventRepo}
 }
 
