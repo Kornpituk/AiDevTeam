@@ -75,10 +75,23 @@ func NewServer(cfg *config.Config) *Server {
 	taskRepo := repository.NewTaskRepository(db)
 	eventRepo := repository.NewEventRepository(db)
 	artifactRepo := repository.NewArtifactRepository(db)
+	profileRepo := repository.NewAgentProfileRepository(db)
+	teamRepo := repository.NewAgentTeamRepository(db)
+	teamMemberRepo := repository.NewAgentTeamMemberRepository(db)
+	runRepo := repository.NewAgentRunRepository(db)
+	stepRepo := repository.NewAgentRunStepRepository(db)
+	messageRepo := repository.NewAgentMessageRepository(db)
+	approvalRepo := repository.NewHumanApprovalRepository(db)
 
 	taskHandler := handler.NewTaskHandler(taskRepo)
 	eventHandler := handler.NewEventHandler(eventRepo)
 	artifactHandler := handler.NewArtifactHandler(artifactRepo)
+	profileHandler := handler.NewAgentProfileHandler(profileRepo)
+	teamHandler := handler.NewAgentTeamHandler(teamRepo, teamMemberRepo)
+	runHandler := handler.NewAgentRunHandler(runRepo)
+	stepHandler := handler.NewAgentRunStepHandler(stepRepo)
+	messageHandler := handler.NewAgentMessageHandler(messageRepo)
+	approvalHandler := handler.NewHumanApprovalHandler(approvalRepo)
 
 	router := mux.NewRouter()
 
@@ -104,6 +117,37 @@ func NewServer(cfg *config.Config) *Server {
 	// Artifacts
 	router.HandleFunc("/tasks/{id}/artifacts", artifactHandler.CreateArtifact).Methods("POST")
 	router.HandleFunc("/tasks/{id}/artifacts", artifactHandler.GetArtifacts).Methods("GET")
+
+	// Agent Profiles
+	router.HandleFunc("/agent-profiles", profileHandler.CreateAgentProfile).Methods("POST")
+	router.HandleFunc("/agent-profiles", profileHandler.GetAgentProfiles).Methods("GET")
+	router.HandleFunc("/agent-profiles/{id}", profileHandler.GetAgentProfile).Methods("GET")
+
+	// Agent Teams
+	router.HandleFunc("/agent-teams", teamHandler.CreateAgentTeam).Methods("POST")
+	router.HandleFunc("/agent-teams", teamHandler.GetAgentTeams).Methods("GET")
+	router.HandleFunc("/agent-teams/{id}", teamHandler.GetAgentTeam).Methods("GET")
+	router.HandleFunc("/agent-teams/{id}/members", teamHandler.CreateTeamMember).Methods("POST")
+	router.HandleFunc("/agent-teams/{id}/members", teamHandler.GetTeamMembers).Methods("GET")
+
+	// Agent Runs
+	router.HandleFunc("/tasks/{id}/agent-runs", runHandler.CreateAgentRun).Methods("POST")
+	router.HandleFunc("/tasks/{id}/agent-runs", runHandler.GetAgentRunsByTask).Methods("GET")
+	router.HandleFunc("/agent-runs/{id}", runHandler.GetAgentRun).Methods("GET")
+
+	// Agent Run Steps
+	router.HandleFunc("/agent-runs/{id}/steps", stepHandler.CreateRunStep).Methods("POST")
+	router.HandleFunc("/agent-runs/{id}/steps", stepHandler.GetRunSteps).Methods("GET")
+	router.HandleFunc("/agent-run-steps/{id}/status", stepHandler.UpdateStepStatus).Methods("PATCH")
+
+	// Agent Messages
+	router.HandleFunc("/agent-runs/{id}/messages", messageHandler.CreateMessage).Methods("POST")
+	router.HandleFunc("/agent-runs/{id}/messages", messageHandler.GetMessages).Methods("GET")
+
+	// Human Approvals
+	router.HandleFunc("/agent-runs/{id}/approvals", approvalHandler.CreateApproval).Methods("POST")
+	router.HandleFunc("/agent-runs/{id}/approvals", approvalHandler.GetApprovals).Methods("GET")
+	router.HandleFunc("/human-approvals/{id}/status", approvalHandler.UpdateApprovalStatus).Methods("PATCH")
 
 	return &Server{
 		cfg:    cfg,
