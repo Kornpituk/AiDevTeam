@@ -4,6 +4,7 @@ import { getTask, getEvents, getArtifacts, Task, Event, Artifact } from "@/lib/a
 import { TaskDetail } from "@/components/TaskDetail/TaskDetail";
 import { EventsTimeline } from "@/components/EventsTimeline/EventsTimeline";
 import { ArtifactsViewer } from "@/components/ArtifactsViewer/ArtifactsViewer";
+import { TaskAgentRunsPanel } from "@/components/AgentRuns/TaskAgentRunsPanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -86,11 +87,12 @@ export default async function TaskDetailPage({ params }: TaskDetailPageParams) {
             <TaskDetail task={task} />
             <EventsTimeline events={events} />
           </div>
-          <div className="space-y-6">
-            <ArtifactsViewer artifacts={artifacts} />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+           <div className="space-y-6">
+             <ArtifactsViewer artifacts={artifacts} />
+             <TaskAgentRunsPanel taskId={taskId} />
+           </div>
+         </div>
+       )}
+     </div>
+   );
+ }

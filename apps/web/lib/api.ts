@@ -233,3 +233,125 @@ export async function addAgentTeamMember(
     body: JSON.stringify(data),
   });
 }
+
+export type AgentRunStatus =
+  | "draft"
+  | "planned"
+  | "waiting_approval"
+  | "approved"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export const AGENT_RUN_STATUSES: AgentRunStatus[] = [
+  "draft",
+  "planned",
+  "waiting_approval",
+  "approved",
+  "running",
+  "paused",
+  "completed",
+  "failed",
+  "cancelled",
+];
+
+export type AgentRunStepStatus =
+  | "pending"
+  | "waiting_approval"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped"
+  | "cancelled";
+
+export const AGENT_RUN_STEP_STATUSES: AgentRunStepStatus[] = [
+  "pending",
+  "waiting_approval",
+  "running",
+  "completed",
+  "failed",
+  "skipped",
+  "cancelled",
+];
+
+export interface AgentRun {
+  id: string;
+  task_id: string;
+  team_id?: string;
+  status: AgentRunStatus;
+  goal?: string;
+  summary?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentRunStep {
+  id: string;
+  run_id: string;
+  profile_id?: string;
+  step_type: string;
+  status: AgentRunStepStatus;
+  title: string;
+  instructions?: string;
+  output?: string;
+  position: number;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getAgentRuns(taskId: string): Promise<AgentRun[]> {
+  return fetchApi<AgentRun[]>(`/tasks/${taskId}/agent-runs`);
+}
+
+export async function getAgentRun(id: string): Promise<AgentRun> {
+  return fetchApi<AgentRun>(`/agent-runs/${id}`);
+}
+
+export async function createAgentRun(
+  taskId: string,
+  data: {
+    team_id?: string;
+    goal?: string;
+    status?: AgentRunStatus;
+  }
+): Promise<AgentRun> {
+  return fetchApi<AgentRun>(`/tasks/${taskId}/agent-runs`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getAgentRunSteps(runId: string): Promise<AgentRunStep[]> {
+  return fetchApi<AgentRunStep[]>(`/agent-runs/${runId}/steps`);
+}
+
+export async function createAgentRunStep(
+  runId: string,
+  data: {
+    profile_id?: string;
+    step_type: string;
+    title: string;
+    instructions?: string;
+    position?: number;
+    status?: AgentRunStepStatus;
+  }
+): Promise<AgentRunStep> {
+  return fetchApi<AgentRunStep>(`/agent-runs/${runId}/steps`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateAgentRunStepStatus(
+  stepId: string,
+  status: AgentRunStepStatus
+): Promise<AgentRunStep> {
+  return fetchApi<AgentRunStep>(`/agent-run-steps/${stepId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}

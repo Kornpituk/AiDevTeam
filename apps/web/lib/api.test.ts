@@ -16,11 +16,21 @@ import {
   createAgentTeam,
   getAgentTeamMembers,
   addAgentTeamMember,
+  getAgentRuns,
+  getAgentRun,
+  createAgentRun,
+  getAgentRunSteps,
+  createAgentRunStep,
+  updateAgentRunStepStatus,
   type Task,
   type TaskStatus,
   type AgentProfile,
   type AgentTeam,
   type AgentTeamMember,
+  type AgentRun,
+  type AgentRunStep,
+  type AgentRunStatus,
+  type AgentRunStepStatus,
 } from "@/lib/api";
 
 const mockAgentProfiles: AgentProfile[] = [
@@ -61,6 +71,54 @@ const mockTeamMembers: AgentTeamMember[] = [
     member_role: "lead_developer",
     position: 0,
     created_at: "2024-01-01T00:00:00Z",
+  },
+];
+
+const mockAgentRuns: AgentRun[] = [
+  {
+    id: "r1",
+    task_id: "1",
+    team_id: "t1",
+    status: "draft",
+    goal: "Implement the feature",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "r2",
+    task_id: "1",
+    status: "running",
+    goal: "Review the code",
+    created_at: "2024-01-02T00:00:00Z",
+    updated_at: "2024-01-02T00:00:00Z",
+  },
+];
+
+const mockAgentRunSteps: AgentRunStep[] = [
+  {
+    id: "s1",
+    run_id: "r1",
+    profile_id: "p1",
+    step_type: "plan",
+    status: "completed",
+    title: "Plan the implementation",
+    instructions: "Create a detailed plan",
+    output: "Plan created",
+    position: 0,
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "s2",
+    run_id: "r1",
+    profile_id: "p2",
+    step_type: "review",
+    status: "pending",
+    title: "Review the code",
+    instructions: "Review the implementation",
+    position: 1,
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
   },
 ];
 
@@ -224,6 +282,75 @@ const handlers = [
     };
     return HttpResponse.json({ data: newMember }, { status: 201 });
   }),
+
+  http.get(`${API_BASE_URL}/tasks/:id/agent-runs`, ({ params }) => {
+    const runs = mockAgentRuns.filter((r) => r.task_id === params.id);
+    return HttpResponse.json({ data: runs });
+  }),
+
+  http.get(`${API_BASE_URL}/agent-runs/:id`, ({ params }) => {
+    const run = mockAgentRuns.find((r) => r.id === params.id);
+    if (run) {
+      return HttpResponse.json({ data: run });
+    }
+    return HttpResponse.json({ error: "Not found" }, { status: 404 });
+  }),
+
+  http.post(`${API_BASE_URL}/tasks/:id/agent-runs`, async ({ params, request }) => {
+    const body = (await request.json()) as {
+      team_id?: string;
+      goal?: string;
+      status?: AgentRunStatus;
+    };
+    const newRun: AgentRun = {
+      id: "r3",
+      task_id: params.id as string,
+      team_id: body.team_id,
+      status: body.status || "draft",
+      goal: body.goal,
+      created_at: "2024-01-03T00:00:00Z",
+      updated_at: "2024-01-03T00:00:00Z",
+    };
+    return HttpResponse.json({ data: newRun }, { status: 201 });
+  }),
+
+  http.get(`${API_BASE_URL}/agent-runs/:id/steps`, ({ params }) => {
+    const steps = mockAgentRunSteps.filter((s) => s.run_id === params.id);
+    return HttpResponse.json({ data: steps });
+  }),
+
+  http.post(`${API_BASE_URL}/agent-runs/:id/steps`, async ({ params, request }) => {
+    const body = (await request.json()) as {
+      profile_id?: string;
+      step_type: string;
+      title: string;
+      instructions?: string;
+      position?: number;
+      status?: AgentRunStepStatus;
+    };
+    const newStep: AgentRunStep = {
+      id: "s3",
+      run_id: params.id as string,
+      profile_id: body.profile_id,
+      step_type: body.step_type,
+      status: body.status || "pending",
+      title: body.title,
+      instructions: body.instructions,
+      position: body.position || 0,
+      created_at: "2024-01-03T00:00:00Z",
+      updated_at: "2024-01-03T00:00:00Z",
+    };
+    return HttpResponse.json({ data: newStep }, { status: 201 });
+  }),
+
+  http.patch(`${API_BASE_URL}/agent-run-steps/:id/status`, async ({ params, request }) => {
+    const body = (await request.json()) as { status: AgentRunStepStatus };
+    const step = mockAgentRunSteps.find((s) => s.id === params.id);
+    if (step) {
+      return HttpResponse.json({ data: { ...step, status: body.status } });
+    }
+    return HttpResponse.json({ error: "Not found" }, { status: 404 });
+  }),
 ];
 
 const server = setupServer(...handlers);
@@ -355,6 +482,73 @@ describe("API Functions", () => {
       expect(member.id).toBe("m2");
       expect(member.profile_id).toBe("p2");
       expect(member.member_role).toBe("reviewer");
+    });
+  });
+
+  describe("getAgentRuns", () => {
+    it("fetches agent runs for a task", async () => {
+      const runs = await getAgentRuns("1");
+      expect(runs).toHaveLength(2);
+      expect(runs[0].id).toBe("r1");
+      expect(runs[0].task_id).toBe("1");
+    });
+  });
+
+  describe("getAgentRun", () => {
+    it("fetches a single agent run by id", async () => {
+      const run = await getAgentRun("r1");
+      expect(run.id).toBe("r1");
+      expect(run.status).toBe("draft");
+      expect(run.goal).toBe("Implement the feature");
+    });
+  });
+
+  describe("createAgentRun", () => {
+    it("creates a new agent run", async () => {
+      const run = await createAgentRun("1", {
+        team_id: "t1",
+        goal: "New run goal",
+        status: "draft",
+      });
+      expect(run.id).toBe("r3");
+      expect(run.task_id).toBe("1");
+      expect(run.team_id).toBe("t1");
+      expect(run.goal).toBe("New run goal");
+      expect(run.status).toBe("draft");
+    });
+  });
+
+  describe("getAgentRunSteps", () => {
+    it("fetches steps for an agent run", async () => {
+      const steps = await getAgentRunSteps("r1");
+      expect(steps).toHaveLength(2);
+      expect(steps[0].id).toBe("s1");
+      expect(steps[0].run_id).toBe("r1");
+    });
+  });
+
+  describe("createAgentRunStep", () => {
+    it("creates a new agent run step", async () => {
+      const step = await createAgentRunStep("r1", {
+        profile_id: "p1",
+        step_type: "implement",
+        title: "Implement the feature",
+        instructions: "Write the code",
+        position: 2,
+        status: "pending",
+      });
+      expect(step.id).toBe("s3");
+      expect(step.run_id).toBe("r1");
+      expect(step.step_type).toBe("implement");
+      expect(step.title).toBe("Implement the feature");
+      expect(step.status).toBe("pending");
+    });
+  });
+
+  describe("updateAgentRunStepStatus", () => {
+    it("updates step status", async () => {
+      const step = await updateAgentRunStepStatus("s1", "completed");
+      expect(step.status).toBe("completed");
     });
   });
 });
