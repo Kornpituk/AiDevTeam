@@ -1,5 +1,33 @@
 import { API_BASE_URL } from "./env";
 
+export interface AgentProfile {
+  id: string;
+  name: string;
+  role: string;
+  description?: string;
+  system_prompt?: string;
+  default_model?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentTeam {
+  id: string;
+  name: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentTeamMember {
+  id: string;
+  team_id: string;
+  profile_id: string;
+  member_role: string;
+  position: number;
+  created_at: string;
+}
+
 export type TaskStatus =
   | "pending"
   | "planning"
@@ -144,6 +172,63 @@ export async function createArtifact(
   }
 ): Promise<Artifact> {
   return fetchApi<Artifact>(`/tasks/${taskId}/artifacts`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getAgentProfiles(): Promise<AgentProfile[]> {
+  return fetchApi<AgentProfile[]>("/agent-profiles");
+}
+
+export async function getAgentProfile(id: string): Promise<AgentProfile> {
+  return fetchApi<AgentProfile>(`/agent-profiles/${id}`);
+}
+
+export async function createAgentProfile(data: {
+  name: string;
+  role: string;
+  description?: string;
+  system_prompt?: string;
+  default_model?: string;
+}): Promise<AgentProfile> {
+  return fetchApi<AgentProfile>("/agent-profiles", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getAgentTeams(): Promise<AgentTeam[]> {
+  return fetchApi<AgentTeam[]>("/agent-teams");
+}
+
+export async function getAgentTeam(id: string): Promise<AgentTeam> {
+  return fetchApi<AgentTeam>(`/agent-teams/${id}`);
+}
+
+export async function createAgentTeam(data: {
+  name: string;
+  description?: string;
+}): Promise<AgentTeam> {
+  return fetchApi<AgentTeam>("/agent-teams", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getAgentTeamMembers(teamId: string): Promise<AgentTeamMember[]> {
+  return fetchApi<AgentTeamMember[]>(`/agent-teams/${teamId}/members`);
+}
+
+export async function addAgentTeamMember(
+  teamId: string,
+  data: {
+    profile_id: string;
+    member_role: string;
+    position?: number;
+  }
+): Promise<AgentTeamMember> {
+  return fetchApi<AgentTeamMember>(`/agent-teams/${teamId}/members`, {
     method: "POST",
     body: JSON.stringify(data),
   });

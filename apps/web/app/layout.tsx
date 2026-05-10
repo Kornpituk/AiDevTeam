@@ -28,20 +28,26 @@ export default function RootLayout({
                     </div>
                     <span className="text-xl font-bold text-gray-900">AiDevT</span>
                   </Link>
-                  <div className="hidden md:flex items-center space-x-1">
-                    <Link
-                      href="/tasks"
-                      className="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors"
-                    >
-                      Tasks
-                    </Link>
-                    <Link
-                      href="/tasks/new"
-                      className="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors"
-                    >
-                      New Task
-                    </Link>
-                  </div>
+                   <div className="hidden md:flex items-center space-x-1">
+                     <Link
+                       href="/tasks"
+                       className="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                     >
+                       Tasks
+                     </Link>
+                     <Link
+                       href="/tasks/new"
+                       className="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                     >
+                       New Task
+                     </Link>
+                     <Link
+                       href="/agents"
+                       className="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                     >
+                       Agents
+                     </Link>
+                   </div>
                 </div>
                 <div className="flex items-center">
                   <Link
