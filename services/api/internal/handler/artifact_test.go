@@ -13,9 +13,9 @@ import (
 )
 
 type mockArtifactRepo struct {
-	createErr   error
-	getByIDErr  error
-	artifacts   []model.TaskArtifact
+	createErr       error
+	getByIDErr      error
+	artifacts       []model.TaskArtifact
 	createdArtifact *model.TaskArtifact
 }
 
@@ -23,12 +23,12 @@ func (m *mockArtifactRepo) Create(artifact *model.TaskArtifact) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
-	artifact.ID = 1
+	artifact.ID = testUUID
 	m.createdArtifact = artifact
 	return nil
 }
 
-func (m *mockArtifactRepo) GetByTaskID(taskID int) ([]model.TaskArtifact, error) {
+func (m *mockArtifactRepo) GetByTaskID(taskID string) ([]model.TaskArtifact, error) {
 	if m.getByIDErr != nil {
 		return nil, m.getByIDErr
 	}
@@ -51,25 +51,25 @@ func TestCreateArtifact(t *testing.T) {
 	}{
 		{
 			name:           "success",
-			id:             "1",
-			body:           map[string]string{"name": "test.go", "type": "code", "content": "package main"},
+			id:             testUUID,
+			body:           map[string]string{"name": "test.go", "artifact_type": "code", "content": "package main"},
 			expectedStatus: http.StatusCreated,
 		},
 		{
-			name:           "invalid id",
+			name:           "invalid id format",
 			id:             "abc",
 			body:           map[string]string{"name": "test.go"},
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:           "invalid JSON",
-			id:             "1",
+			id:             testUUID,
 			body:           "not json",
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:           "repo error",
-			id:             "1",
+			id:             testUUID,
 			body:           map[string]string{"name": "test.go"},
 			mockErr:        errors.New("db error"),
 			expectedStatus: http.StatusInternalServerError,
@@ -109,14 +109,17 @@ func TestGetArtifacts(t *testing.T) {
 		expectedStatus int
 	}{
 		{
-			name:           "success with artifacts",
-			id:             "1",
-			artifacts:      []model.TaskArtifact{{ID: 1, TaskID: 1, Name: "test.go"}, {ID: 2, TaskID: 1, Name: "test2.go"}},
+			name: "success with artifacts",
+			id:   testUUID,
+			artifacts: []model.TaskArtifact{
+				{ID: "a1", TaskID: testUUID, Name: "test.go", ArtifactType: "code"},
+				{ID: "a2", TaskID: testUUID, Name: "test2.go", ArtifactType: "code"},
+			},
 			expectedStatus: http.StatusOK,
 		},
 		{
 			name:           "success empty",
-			id:             "1",
+			id:             testUUID,
 			artifacts:      []model.TaskArtifact{},
 			expectedStatus: http.StatusOK,
 		},
@@ -127,7 +130,7 @@ func TestGetArtifacts(t *testing.T) {
 		},
 		{
 			name:           "repo error",
-			id:             "1",
+			id:             testUUID,
 			mockErr:        errors.New("db error"),
 			expectedStatus: http.StatusInternalServerError,
 		},

@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
@@ -11,7 +10,7 @@ import (
 
 type EventRepository interface {
 	Create(event *model.TaskEvent) error
-	GetByTaskID(taskID int) ([]model.TaskEvent, error)
+	GetByTaskID(taskID string) ([]model.TaskEvent, error)
 }
 
 type EventHandler struct {
@@ -24,8 +23,9 @@ func NewEventHandler(eventRepo EventRepository) *EventHandler {
 
 func (h *EventHandler) CreateEvent(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	taskID, err := strconv.Atoi(vars["id"])
-	if err != nil {
+	taskID := vars["id"]
+
+	if !isValidUUID(taskID) {
 		respondError(w, http.StatusBadRequest, "Invalid task ID")
 		return
 	}
@@ -48,8 +48,9 @@ func (h *EventHandler) CreateEvent(w http.ResponseWriter, r *http.Request) {
 
 func (h *EventHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	taskID, err := strconv.Atoi(vars["id"])
-	if err != nil {
+	taskID := vars["id"]
+
+	if !isValidUUID(taskID) {
 		respondError(w, http.StatusBadRequest, "Invalid task ID")
 		return
 	}

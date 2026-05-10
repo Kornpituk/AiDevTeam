@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
@@ -11,7 +10,7 @@ import (
 
 type ArtifactRepository interface {
 	Create(artifact *model.TaskArtifact) error
-	GetByTaskID(taskID int) ([]model.TaskArtifact, error)
+	GetByTaskID(taskID string) ([]model.TaskArtifact, error)
 }
 
 type ArtifactHandler struct {
@@ -24,8 +23,9 @@ func NewArtifactHandler(artifactRepo ArtifactRepository) *ArtifactHandler {
 
 func (h *ArtifactHandler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	taskID, err := strconv.Atoi(vars["id"])
-	if err != nil {
+	taskID := vars["id"]
+
+	if !isValidUUID(taskID) {
 		respondError(w, http.StatusBadRequest, "Invalid task ID")
 		return
 	}
@@ -48,8 +48,9 @@ func (h *ArtifactHandler) CreateArtifact(w http.ResponseWriter, r *http.Request)
 
 func (h *ArtifactHandler) GetArtifacts(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	taskID, err := strconv.Atoi(vars["id"])
-	if err != nil {
+	taskID := vars["id"]
+
+	if !isValidUUID(taskID) {
 		respondError(w, http.StatusBadRequest, "Invalid task ID")
 		return
 	}

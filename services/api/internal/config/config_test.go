@@ -24,8 +24,8 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Errorf("expected DB User postgres, got %s", cfg.Database.User)
 	}
 
-	if cfg.Database.Password != "password" {
-		t.Errorf("expected DB Password password, got %s", cfg.Database.Password)
+	if cfg.Database.Password != "postgres" {
+		t.Errorf("expected DB Password postgres, got %s", cfg.Database.Password)
 	}
 
 	if cfg.Database.Name != "aidevt" {

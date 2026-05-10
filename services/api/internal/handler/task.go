@@ -3,17 +3,28 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
 )
 
+var validStatuses = map[string]bool{
+	"pending":     true,
+	"planning":    true,
+	"approved":    true,
+	"in_progress": true,
+	"reviewing":   true,
+	"completed":   true,
+	"failed":      true,
+}
+
 type TaskRepository interface {
 	Create(task *model.Task) error
 	GetAll() ([]model.Task, error)
-	GetByID(id int) (*model.Task, error)
-	UpdateStatus(id int, status string) error
+	GetByID(id string) (*model.Task, error)
+	UpdateStatus(id string, status string) (*model.Task, error)
+	UpdatePlan(id string, plan string) (*model.Task, error)
+	UpdateReviewNotes(id string, reviewNotes string) (*model.Task, error)
 }
 
 type TaskHandler struct {
@@ -22,6 +33,16 @@ type TaskHandler struct {
 
 func NewTaskHandler(taskRepo TaskRepository) *TaskHandler {
 	return &TaskHandler{taskRepo: taskRepo}
+}
+
+func isValidUUID(id string) bool {
+	if len(id) != 36 {
+		return false
+	}
+	if id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
+		return false
+	}
+	return true
 }
 
 func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
@@ -58,8 +79,9 @@ func (h *TaskHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 
 func (h *TaskHandler) GetTask(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
-	if err != nil {
+	id := vars["id"]
+
+	if !isValidUUID(id) {
 		respondError(w, http.StatusBadRequest, "Invalid task ID")
 		return
 	}
@@ -75,8 +97,9 @@ func (h *TaskHandler) GetTask(w http.ResponseWriter, r *http.Request) {
 
 func (h *TaskHandler) UpdateTaskStatus(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
-	if err != nil {
+	id := vars["id"]
+
+	if !isValidUUID(id) {
 		respondError(w, http.StatusBadRequest, "Invalid task ID")
 		return
 	}
@@ -89,10 +112,68 @@ func (h *TaskHandler) UpdateTaskStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.taskRepo.UpdateStatus(id, req.Status); err != nil {
+	if !validStatuses[req.Status] {
+		respondError(w, http.StatusBadRequest, "Invalid status")
+		return
+	}
+
+	task, err := h.taskRepo.UpdateStatus(id, req.Status)
+	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to update task status")
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]string{"message": "Status updated"})
+	respondJSON(w, http.StatusOK, task)
+}
+
+func (h *TaskHandler) UpdateTaskPlan(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	if !isValidUUID(id) {
+		respondError(w, http.StatusBadRequest, "Invalid task ID")
+		return
+	}
+
+	var req struct {
+		Plan string `json:"plan"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	task, err := h.taskRepo.UpdatePlan(id, req.Plan)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to update task plan")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, task)
+}
+
+func (h *TaskHandler) UpdateTaskReviewNotes(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	if !isValidUUID(id) {
+		respondError(w, http.StatusBadRequest, "Invalid task ID")
+		return
+	}
+
+	var req struct {
+		ReviewNotes string `json:"review_notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	task, err := h.taskRepo.UpdateReviewNotes(id, req.ReviewNotes)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to update task review notes")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, task)
 }

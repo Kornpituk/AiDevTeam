@@ -21,13 +21,15 @@ func TestRespondJSON(t *testing.T) {
 		t.Errorf("expected Content-Type application/json, got %q", ct)
 	}
 
-	var result map[string]string
+	var result struct {
+		Data map[string]string `json:"data"`
+	}
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Errorf("failed to decode response: %v", err)
 	}
 
-	if result["message"] != "hello" || result["code"] != "test" {
-		t.Errorf("unexpected response body: %v", result)
+	if result.Data["message"] != "hello" || result.Data["code"] != "test" {
+		t.Errorf("unexpected response body: %v", result.Data)
 	}
 }
 

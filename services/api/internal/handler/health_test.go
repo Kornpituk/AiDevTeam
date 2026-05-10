@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,9 +17,17 @@ func TestHealthHandler(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
 	}
 
-	expected := `{"status":"ok"}`
-	if body := w.Body.String(); body != expected+"\n" && body != expected {
-		t.Errorf("expected body %q, got %q", expected, body)
+	var result struct {
+		Data struct {
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Errorf("failed to decode response: %v", err)
+	}
+
+	if result.Data.Status != "ok" {
+		t.Errorf("expected status 'ok', got %q", result.Data.Status)
 	}
 
 	if ct := w.Header().Get("Content-Type"); ct != "application/json" {

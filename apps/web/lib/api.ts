@@ -101,6 +101,20 @@ export async function updateTaskStatus(id: string, status: TaskStatus): Promise<
   });
 }
 
+export async function updateTaskPlan(id: string, plan: string): Promise<Task> {
+  return fetchApi<Task>(`/tasks/${id}/plan`, {
+    method: "PATCH",
+    body: JSON.stringify({ plan }),
+  });
+}
+
+export async function updateTaskReviewNotes(id: string, reviewNotes: string): Promise<Task> {
+  return fetchApi<Task>(`/tasks/${id}/review-notes`, {
+    method: "PATCH",
+    body: JSON.stringify({ review_notes: reviewNotes }),
+  });
+}
+
 export async function getEvents(taskId: string): Promise<Event[]> {
   return fetchApi<Event[]>(`/tasks/${taskId}/events`);
 }

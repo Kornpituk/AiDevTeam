@@ -13,9 +13,9 @@ import (
 )
 
 type mockEventRepo struct {
-	createErr   error
-	getByIDErr  error
-	events      []model.TaskEvent
+	createErr    error
+	getByIDErr   error
+	events       []model.TaskEvent
 	createdEvent *model.TaskEvent
 }
 
@@ -23,12 +23,12 @@ func (m *mockEventRepo) Create(event *model.TaskEvent) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
-	event.ID = 1
+	event.ID = testUUID
 	m.createdEvent = event
 	return nil
 }
 
-func (m *mockEventRepo) GetByTaskID(taskID int) ([]model.TaskEvent, error) {
+func (m *mockEventRepo) GetByTaskID(taskID string) ([]model.TaskEvent, error) {
 	if m.getByIDErr != nil {
 		return nil, m.getByIDErr
 	}
@@ -51,25 +51,25 @@ func TestCreateEvent(t *testing.T) {
 	}{
 		{
 			name:           "success",
-			id:             "1",
-			body:           map[string]string{"event_type": "note", "data": "Test note"},
+			id:             testUUID,
+			body:           map[string]string{"event_type": "note", "message": "Test note"},
 			expectedStatus: http.StatusCreated,
 		},
 		{
-			name:           "invalid id",
+			name:           "invalid id format",
 			id:             "abc",
 			body:           map[string]string{"event_type": "note"},
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:           "invalid JSON",
-			id:             "1",
+			id:             testUUID,
 			body:           "not json",
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:           "repo error",
-			id:             "1",
+			id:             testUUID,
 			body:           map[string]string{"event_type": "note"},
 			mockErr:        errors.New("db error"),
 			expectedStatus: http.StatusInternalServerError,
@@ -110,13 +110,16 @@ func TestGetEvents(t *testing.T) {
 	}{
 		{
 			name:           "success with events",
-			id:             "1",
-			events:         []model.TaskEvent{{ID: 1, TaskID: 1, EventType: "note"}, {ID: 2, TaskID: 1, EventType: "log"}},
+			id:             testUUID,
+			events: []model.TaskEvent{
+				{ID: "e1", TaskID: testUUID, EventType: "note", Message: "Test 1"},
+				{ID: "e2", TaskID: testUUID, EventType: "log", Message: "Test 2"},
+			},
 			expectedStatus: http.StatusOK,
 		},
 		{
 			name:           "success empty",
-			id:             "1",
+			id:             testUUID,
 			events:         []model.TaskEvent{},
 			expectedStatus: http.StatusOK,
 		},
@@ -127,7 +130,7 @@ func TestGetEvents(t *testing.T) {
 		},
 		{
 			name:           "repo error",
-			id:             "1",
+			id:             testUUID,
 			mockErr:        errors.New("db error"),
 			expectedStatus: http.StatusInternalServerError,
 		},
