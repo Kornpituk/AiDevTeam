@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -58,7 +59,7 @@ func (m *mockTaskRepo) GetByID(id string) (*model.Task, error) {
 			return &t, nil
 		}
 	}
-	return nil, errors.New("not found")
+	return nil, sql.ErrNoRows
 }
 
 func (m *mockTaskRepo) UpdateStatus(id string, status string) (*model.Task, error) {
@@ -75,7 +76,7 @@ func (m *mockTaskRepo) UpdateStatus(id string, status string) (*model.Task, erro
 			return &updated, nil
 		}
 	}
-	return &model.Task{ID: id, Status: status}, nil
+	return nil, sql.ErrNoRows
 }
 
 func (m *mockTaskRepo) UpdatePlan(id string, plan string) (*model.Task, error) {
@@ -92,7 +93,7 @@ func (m *mockTaskRepo) UpdatePlan(id string, plan string) (*model.Task, error) {
 			return &updated, nil
 		}
 	}
-	return &model.Task{ID: id, Plan: plan}, nil
+	return nil, sql.ErrNoRows
 }
 
 func (m *mockTaskRepo) UpdateReviewNotes(id string, reviewNotes string) (*model.Task, error) {
@@ -109,7 +110,7 @@ func (m *mockTaskRepo) UpdateReviewNotes(id string, reviewNotes string) (*model.
 			return &updated, nil
 		}
 	}
-	return &model.Task{ID: id, ReviewNotes: reviewNotes}, nil
+	return nil, sql.ErrNoRows
 }
 
 func createMockTasks() []model.Task {
@@ -399,7 +400,7 @@ func TestUpdateTaskPlan(t *testing.T) {
 			req = mux.SetURLVars(req, map[string]string{"id": tt.id})
 			w := httptest.NewRecorder()
 
-			mock := &mockTaskRepo{updatePlanErr: tt.mockErr}
+			mock := &mockTaskRepo{updatePlanErr: tt.mockErr, tasks: createMockTasks()}
 			handler := NewTaskHandler(mock)
 			handler.UpdateTaskPlan(w, req)
 
@@ -464,7 +465,7 @@ func TestUpdateTaskReviewNotes(t *testing.T) {
 			req = mux.SetURLVars(req, map[string]string{"id": tt.id})
 			w := httptest.NewRecorder()
 
-			mock := &mockTaskRepo{updateReviewErr: tt.mockErr}
+			mock := &mockTaskRepo{updateReviewErr: tt.mockErr, tasks: createMockTasks()}
 			handler := NewTaskHandler(mock)
 			handler.UpdateTaskReviewNotes(w, req)
 

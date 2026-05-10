@@ -17,7 +17,15 @@ func NewTaskRepository(db *sql.DB) *TaskRepository {
 
 func (r *TaskRepository) Create(task *model.Task) error {
 	query := `INSERT INTO ai_tasks (title, description, status) VALUES ($1, $2, $3) RETURNING id, plan, review_notes, created_at, updated_at`
-	return r.db.QueryRow(query, task.Title, task.Description, task.Status).Scan(&task.ID, &task.Plan, &task.ReviewNotes, &task.CreatedAt, &task.UpdatedAt)
+	var plan sql.NullString
+	var reviewNotes sql.NullString
+	err := r.db.QueryRow(query, task.Title, task.Description, task.Status).Scan(&task.ID, &plan, &reviewNotes, &task.CreatedAt, &task.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	task.Plan = plan.String
+	task.ReviewNotes = reviewNotes.String
+	return nil
 }
 
 func (r *TaskRepository) GetAll() ([]model.Task, error) {
@@ -58,30 +66,45 @@ func (r *TaskRepository) GetByID(id string) (*model.Task, error) {
 }
 
 func (r *TaskRepository) UpdateStatus(id string, status string) (*model.Task, error) {
-	query := `UPDATE ai_tasks SET status = $1, updated_at = NOW() WHERE id = $2`
-	_, err := r.db.Exec(query, status, id)
+	query := `UPDATE ai_tasks SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING id, title, description, status, plan, review_notes, created_at, updated_at`
+	var task model.Task
+	var plan sql.NullString
+	var reviewNotes sql.NullString
+	err := r.db.QueryRow(query, status, id).Scan(&task.ID, &task.Title, &task.Description, &task.Status, &plan, &reviewNotes, &task.CreatedAt, &task.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
-	return r.GetByID(id)
+	task.Plan = plan.String
+	task.ReviewNotes = reviewNotes.String
+	return &task, nil
 }
 
 func (r *TaskRepository) UpdatePlan(id string, plan string) (*model.Task, error) {
-	query := `UPDATE ai_tasks SET plan = $1, updated_at = NOW() WHERE id = $2`
-	_, err := r.db.Exec(query, plan, id)
+	query := `UPDATE ai_tasks SET plan = $1, updated_at = NOW() WHERE id = $2 RETURNING id, title, description, status, plan, review_notes, created_at, updated_at`
+	var task model.Task
+	var planResult sql.NullString
+	var reviewNotes sql.NullString
+	err := r.db.QueryRow(query, plan, id).Scan(&task.ID, &task.Title, &task.Description, &task.Status, &planResult, &reviewNotes, &task.CreatedAt, &task.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
-	return r.GetByID(id)
+	task.Plan = planResult.String
+	task.ReviewNotes = reviewNotes.String
+	return &task, nil
 }
 
 func (r *TaskRepository) UpdateReviewNotes(id string, reviewNotes string) (*model.Task, error) {
-	query := `UPDATE ai_tasks SET review_notes = $1, updated_at = NOW() WHERE id = $2`
-	_, err := r.db.Exec(query, reviewNotes, id)
+	query := `UPDATE ai_tasks SET review_notes = $1, updated_at = NOW() WHERE id = $2 RETURNING id, title, description, status, plan, review_notes, created_at, updated_at`
+	var task model.Task
+	var plan sql.NullString
+	var reviewNotesResult sql.NullString
+	err := r.db.QueryRow(query, reviewNotes, id).Scan(&task.ID, &task.Title, &task.Description, &task.Status, &plan, &reviewNotesResult, &task.CreatedAt, &task.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
-	return r.GetByID(id)
+	task.Plan = plan.String
+	task.ReviewNotes = reviewNotesResult.String
+	return &task, nil
 }
 
 func (r *TaskRepository) DB() *sql.DB {

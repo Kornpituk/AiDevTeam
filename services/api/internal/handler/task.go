@@ -1,12 +1,18 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gorilla/mux"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
 )
+
+func isNotFoundError(err error) bool {
+	return errors.Is(err, sql.ErrNoRows)
+}
 
 var validStatuses = map[string]bool{
 	"pending":     true,
@@ -41,6 +47,16 @@ func isValidUUID(id string) bool {
 	}
 	if id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
 		return false
+	}
+	for i, c := range id {
+		switch i {
+		case 8, 13, 18, 23:
+			continue
+		default:
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return false
+			}
+		}
 	}
 	return true
 }
@@ -88,7 +104,11 @@ func (h *TaskHandler) GetTask(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.taskRepo.GetByID(id)
 	if err != nil {
-		respondError(w, http.StatusNotFound, "Task not found")
+		if isNotFoundError(err) {
+			respondError(w, http.StatusNotFound, "Task not found")
+		} else {
+			respondError(w, http.StatusInternalServerError, "Failed to get task")
+		}
 		return
 	}
 
@@ -119,7 +139,11 @@ func (h *TaskHandler) UpdateTaskStatus(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.taskRepo.UpdateStatus(id, req.Status)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "Failed to update task status")
+		if isNotFoundError(err) {
+			respondError(w, http.StatusNotFound, "Task not found")
+		} else {
+			respondError(w, http.StatusInternalServerError, "Failed to update task status")
+		}
 		return
 	}
 
@@ -145,7 +169,11 @@ func (h *TaskHandler) UpdateTaskPlan(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.taskRepo.UpdatePlan(id, req.Plan)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "Failed to update task plan")
+		if isNotFoundError(err) {
+			respondError(w, http.StatusNotFound, "Task not found")
+		} else {
+			respondError(w, http.StatusInternalServerError, "Failed to update task plan")
+		}
 		return
 	}
 
@@ -171,7 +199,11 @@ func (h *TaskHandler) UpdateTaskReviewNotes(w http.ResponseWriter, r *http.Reque
 
 	task, err := h.taskRepo.UpdateReviewNotes(id, req.ReviewNotes)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "Failed to update task review notes")
+		if isNotFoundError(err) {
+			respondError(w, http.StatusNotFound, "Task not found")
+		} else {
+			respondError(w, http.StatusInternalServerError, "Failed to update task review notes")
+		}
 		return
 	}
 

@@ -7,8 +7,12 @@ node_modules/
 /coverage
 
 # Next.js
-/.next/
+**/.next/
 /out/
+
+# Go binaries
+**/api/api
+**/*.exe
 
 # Production
 /build
