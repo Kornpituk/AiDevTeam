@@ -390,6 +390,16 @@ func (m *mockOrchestratorRepo) UpdateRunStatusIfIn(id string, newStatus string, 
 	return m.run, nil
 }
 
+func (m *mockOrchestratorRepo) GetTaskByID(id string) (*model.Task, error) {
+	if m.returnErr != nil {
+		return nil, m.returnErr
+	}
+	return &model.Task{
+		ID:    id,
+		Title: "Test Task",
+	}, nil
+}
+
 type mockLLM struct {
 	responses   []string
 	responseIdx int

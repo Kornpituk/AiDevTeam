@@ -241,6 +241,7 @@ New safe ordering:
 - **C.1.1**: Runtime Correctness Fixes
 - **C.1.2**: Orchestration Hardening
 - **C.1.2.1**: Concurrent Start Ordering Fix
+- **C.1.3**: Demo Readiness + Task Context
 
 **Core Functionality Now Available**:
 - ✅ Start/cancel endpoints (`POST /agent-runs/:id/start`, `POST /agent-runs/:id/cancel`)
@@ -296,7 +297,72 @@ New safe ordering:
 
 ---
 
-## Latest Verification (After Phase C.1.2.1)
+### Phase C.1.3: Demo Readiness + Task Context
+
+**Status**: ✅ Complete
+
+**Goal**: Make Phase C Auto Orchestration MVP ready for real demo/use.
+
+**Issues Fixed**:
+
+1. **Task context integrated into orchestration prompts** (`orchestrator.go`):
+   - Added `GetTaskByID` to `OrchestratorRepository` interface
+   - Wired `TaskRepository` into `OrchestratorRepoImpl`
+   - Updated `executeRun` to load task using `run.TaskID`
+   - Task context included in LLM user messages with structured format:
+     ```
+     === TASK CONTEXT ===
+     Title: {task.Title}
+     Description: {task.Description}
+     Plan: {task.Plan}
+     Review Notes: {task.ReviewNotes}
+     
+     === RUN GOAL ===
+     {run.Goal}
+     
+     === STEP INSTRUCTIONS ===
+     {step.Instructions}
+     
+     === PREVIOUS STEP OUTPUTS ===
+     {previousOutputs}
+     ```
+   - If task loading fails: mark run failed with sanitized summary
+   - If `run.TaskID` is empty: continue gracefully without task context
+
+2. **LLM config docs updated** (`.env.example`):
+   - Documented all LLM env vars: `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL`, `LLM_TIMEOUT`
+   - Clarified `LLM_PROVIDER=fake` for demo without API key
+
+3. **Frontend refresh improvement** (`AgentMessagesPanel.tsx`):
+   - Added "Refresh" button to Messages panel
+   - Added `refreshKey` state to trigger re-fetch
+   - Users can manually refresh messages after run completes
+
+4. **Demo runbook created** (`docs/DEMO_RUNBOOK.md`):
+   - Full setup guide: Postgres, migrations, backend, frontend
+   - Fake provider mode: `LLM_PROVIDER=fake` (no API key needed)
+   - Real provider mode: `LLM_PROVIDER=openai` with API key
+   - Step-by-step manual demo flow:
+     1. Create task
+     2. Create agent profiles
+     3. Create agent team
+     4. Add team members in order
+     5. Create agent run from task
+     6. Start run
+     7. Monitor execution
+     8. Cancel if needed
+   - Full environment variables reference
+   - Known limitations clearly documented
+   - Troubleshooting section
+
+**Tests Added**:
+- Task context included in LLM messages
+- Task loading failure marks run failed
+- Empty TaskID skips task context gracefully
+
+---
+
+## Latest Verification (After Phase C.1.3)
 
 ### Backend
 - `go test ./...` → All passing

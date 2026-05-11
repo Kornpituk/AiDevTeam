@@ -24,21 +24,27 @@ export function AgentMessagesPanel({ runId, steps, profiles }: AgentMessagesPane
   const [loading, setLoading] = useState(true)
   const [showAddForm, setShowAddForm] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     async function fetchMessages() {
+      setLoading(true)
       try {
         const data = await getAgentMessages(runId)
         setMessages(data)
+        setError(null)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load messages')
       } finally {
         setLoading(false)
       }
     }
-
     fetchMessages()
-  }, [runId])
+  }, [runId, refreshKey])
+
+  function handleRefresh() {
+    setRefreshKey((k) => k + 1)
+  }
 
   function handleMessageAdded(message: AgentMessage) {
     setMessages((prev) => [...prev, message])
@@ -68,15 +74,20 @@ export function AgentMessagesPanel({ runId, steps, profiles }: AgentMessagesPane
   return (
     <Card>
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">Messages ({messages.length})</CardTitle>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setShowAddForm(!showAddForm)}
-          >
-            {showAddForm ? 'Cancel' : '+ Add Message'}
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={handleRefresh} disabled={loading}>
+              Refresh
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowAddForm(!showAddForm)}
+            >
+              {showAddForm ? 'Cancel' : '+ Add Message'}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">

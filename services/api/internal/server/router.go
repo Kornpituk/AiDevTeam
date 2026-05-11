@@ -92,7 +92,7 @@ func NewServer(cfg *config.Config) *Server {
 		llmProvider = llm.NewFakeProvider()
 	}
 
-	orchestratorRepo := service.NewOrchestratorRepoImpl(runRepo, stepRepo, teamMemberRepo, profileRepo, messageRepo)
+	orchestratorRepo := service.NewOrchestratorRepoImpl(runRepo, stepRepo, teamMemberRepo, profileRepo, messageRepo, taskRepo)
 	orchestrator := service.NewOrchestrator(orchestratorRepo, llmProvider)
 
 	taskHandler := handler.NewTaskHandler(taskRepo)

@@ -26,9 +26,11 @@ type mockOrchestratorRepo struct {
 	steps                []model.AgentRunStep
 	members              []model.AgentTeamMember
 	profiles             map[string]*model.AgentProfile
+	task                 *model.Task
 	getRunErr            error
 	getTeamMembersErr    error
 	getProfileErr        error
+	getTaskErr           error
 	createStepErr        error
 	getStepsErr          error
 	updateStatusErr      error
@@ -185,6 +187,13 @@ func (m *mockOrchestratorRepo) UpdateRunSummary(id string, summary string) (*mod
 		m.run.Summary = summary
 	}
 	return m.run, nil
+}
+
+func (m *mockOrchestratorRepo) GetTaskByID(id string) (*model.Task, error) {
+	if m.getTaskErr != nil {
+		return nil, m.getTaskErr
+	}
+	return m.task, nil
 }
 
 type blockingFakeLLM struct {
@@ -1065,4 +1074,156 @@ func TestStartRun_AtomicStatusTransition(t *testing.T) {
 		delete(orch.running, testRunID)
 		orch.mu.Unlock()
 	})
+}
+
+type capturingLLM struct {
+	llm.LLMProvider
+	messages []llm.Message
+}
+
+func (c *capturingLLM) ChatCompletion(ctx context.Context, messages []llm.Message) (string, error) {
+	c.messages = messages
+	return "captured response", nil
+}
+
+func TestExecuteRun_IncludesTaskContextInMessages(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		TaskID: "task-123",
+		Status: "running",
+		Goal:   "Build a web app",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:           testStepID,
+			RunID:        testRunID,
+			ProfileID:    testProfileID,
+			StepType:     "plan",
+			Status:       "pending",
+			Position:     1,
+			Instructions: "Plan the architecture",
+		},
+	}
+	repo.task = &model.Task{
+		ID:          "task-123",
+		Title:       "Test Task",
+		Description: "A test task description",
+		Plan:        "Step 1, Step 2",
+		ReviewNotes: "Needs review",
+	}
+
+	capLLM := &capturingLLM{}
+	orch := NewOrchestrator(repo, capLLM)
+
+	orch.executeRun(context.Background(), testRunID)
+
+	if len(capLLM.messages) < 2 {
+		t.Fatal("Expected at least 2 messages (system + user)")
+	}
+
+	userMsg := capLLM.messages[len(capLLM.messages)-1]
+	if !strings.Contains(userMsg.Content, "=== TASK CONTEXT ===") {
+		t.Error("Expected task context section in user message")
+	}
+	if !strings.Contains(userMsg.Content, "Test Task") {
+		t.Error("Expected task title in user message")
+	}
+	if !strings.Contains(userMsg.Content, "A test task description") {
+		t.Error("Expected task description in user message")
+	}
+	if !strings.Contains(userMsg.Content, "Step 1, Step 2") {
+		t.Error("Expected task plan in user message")
+	}
+	if !strings.Contains(userMsg.Content, "Needs review") {
+		t.Error("Expected review notes in user message")
+	}
+	if !strings.Contains(userMsg.Content, "Build a web app") {
+		t.Error("Expected run goal in user message")
+	}
+	if !strings.Contains(userMsg.Content, "Plan the architecture") {
+		t.Error("Expected step instructions in user message")
+	}
+}
+
+func TestExecuteRun_TaskLoadFailureFailsRun(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		TaskID: "task-123",
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+	repo.getTaskErr = errors.New("db error")
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(repo, fakeLLM)
+
+	orch.executeRun(context.Background(), testRunID)
+
+	if len(repo.statusHistory) == 0 {
+		t.Fatal("Expected at least one status update")
+	}
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "failed" {
+		t.Errorf("Expected final status 'failed', got %q", lastStatus)
+	}
+	if !strings.Contains(repo.run.Summary, "failed to load task context") {
+		t.Errorf("Summary should mention task load failure, got: %q", repo.run.Summary)
+	}
+}
+
+func TestExecuteRun_EmptyTaskIDSkipsTaskContext(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		TaskID: "",
+		Status: "running",
+		Goal:   "Build something",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:           testStepID,
+			RunID:        testRunID,
+			ProfileID:    testProfileID,
+			StepType:     "plan",
+			Status:       "pending",
+			Position:     1,
+			Instructions: "Do the thing",
+		},
+	}
+
+	capLLM := &capturingLLM{}
+	orch := NewOrchestrator(repo, capLLM)
+
+	orch.executeRun(context.Background(), testRunID)
+
+	if len(capLLM.messages) < 2 {
+		t.Fatal("Expected at least 2 messages (system + user)")
+	}
+
+	userMsg := capLLM.messages[len(capLLM.messages)-1]
+	if strings.Contains(userMsg.Content, "=== TASK CONTEXT ===") {
+		t.Error("Should NOT include task context when TaskID is empty")
+	}
+	if !strings.Contains(userMsg.Content, "Instructions:") {
+		t.Error("Should use old prompt format when TaskID is empty")
+	}
+
+	if len(repo.statusHistory) == 0 {
+		t.Fatal("Expected at least one status update")
+	}
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "completed" {
+		t.Errorf("Expected run to complete successfully, got status: %q", lastStatus)
+	}
 }

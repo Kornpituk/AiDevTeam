@@ -23,6 +23,7 @@ type OrchestratorRepository interface {
 	MarkStepFailed(id string, output string) (*model.AgentRunStep, error)
 	CreateMessage(message *model.AgentMessage) error
 	UpdateRunSummary(id string, summary string) (*model.AgentRun, error)
+	GetTaskByID(taskID string) (*model.Task, error)
 }
 
 type Orchestrator struct {
@@ -158,6 +159,33 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 	default:
 	}
 
+	run, err := o.repo.GetRunByID(runID)
+	if err != nil {
+		if ctx.Err() != nil {
+			_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+			_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
+			return
+		}
+		_, _ = o.repo.UpdateRunStatus(runID, "failed")
+		_, _ = o.repo.UpdateRunSummary(runID, "Run failed: failed to load run context.")
+		return
+	}
+
+	var task *model.Task
+	if run.TaskID != "" {
+		task, err = o.repo.GetTaskByID(run.TaskID)
+		if err != nil {
+			if ctx.Err() != nil {
+				_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+				_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
+				return
+			}
+			_, _ = o.repo.UpdateRunStatus(runID, "failed")
+			_, _ = o.repo.UpdateRunSummary(runID, "Run failed: failed to load task context.")
+			return
+		}
+	}
+
 	steps, err := o.repo.GetStepsByRunID(runID)
 	if err != nil {
 		_, _ = o.repo.UpdateRunStatus(runID, "failed")
@@ -240,6 +268,34 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 			previousOutputs += fmt.Sprintf("Step %d Output:\n%s\n\n", i+1, out)
 		}
 
+		var userContent string
+		if task != nil {
+			plan := task.Plan
+			if plan == "" {
+				plan = "Not provided"
+			}
+			reviewNotes := task.ReviewNotes
+			if reviewNotes == "" {
+				reviewNotes = "Not provided"
+			}
+			userContent = fmt.Sprintf(`=== TASK CONTEXT ===
+Title: %s
+Description: %s
+Plan: %s
+Review Notes: %s
+
+=== RUN GOAL ===
+%s
+
+=== STEP INSTRUCTIONS ===
+%s
+
+=== PREVIOUS STEP OUTPUTS ===
+%s`, task.Title, task.Description, plan, reviewNotes, run.Goal, step.Instructions, previousOutputs)
+		} else {
+			userContent = fmt.Sprintf("Instructions: %s\n\nPrevious Step Outputs:\n%s", step.Instructions, previousOutputs)
+		}
+
 		messages := []llm.Message{
 			{
 				Role:    "system",
@@ -247,7 +303,7 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 			},
 			{
 				Role:    "user",
-				Content: fmt.Sprintf("Instructions: %s\n\nPrevious Step Outputs:\n%s", step.Instructions, previousOutputs),
+				Content: userContent,
 			},
 		}
 

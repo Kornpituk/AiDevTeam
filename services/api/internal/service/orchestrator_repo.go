@@ -11,6 +11,7 @@ type OrchestratorRepoImpl struct {
 	teamMemberRepo *repository.AgentTeamMemberRepository
 	profileRepo    *repository.AgentProfileRepository
 	messageRepo    *repository.AgentMessageRepository
+	taskRepo       *repository.TaskRepository
 }
 
 func NewOrchestratorRepoImpl(
@@ -19,6 +20,7 @@ func NewOrchestratorRepoImpl(
 	teamMemberRepo *repository.AgentTeamMemberRepository,
 	profileRepo *repository.AgentProfileRepository,
 	messageRepo *repository.AgentMessageRepository,
+	taskRepo *repository.TaskRepository,
 ) *OrchestratorRepoImpl {
 	return &OrchestratorRepoImpl{
 		runRepo:        runRepo,
@@ -26,6 +28,7 @@ func NewOrchestratorRepoImpl(
 		teamMemberRepo: teamMemberRepo,
 		profileRepo:    profileRepo,
 		messageRepo:    messageRepo,
+		taskRepo:       taskRepo,
 	}
 }
 
@@ -75,4 +78,8 @@ func (r *OrchestratorRepoImpl) CreateMessage(message *model.AgentMessage) error 
 
 func (r *OrchestratorRepoImpl) UpdateRunSummary(id string, summary string) (*model.AgentRun, error) {
 	return r.runRepo.UpdateSummary(id, summary)
+}
+
+func (r *OrchestratorRepoImpl) GetTaskByID(id string) (*model.Task, error) {
+	return r.taskRepo.GetByID(id)
 }
