@@ -3,11 +3,9 @@
 import { useState, useEffect } from 'react'
 import {
   AgentMessage,
-  AgentMessageRole,
   getAgentMessages,
   AgentRunStep,
   AgentProfile,
-  HumanApprovalStatus,
 } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'

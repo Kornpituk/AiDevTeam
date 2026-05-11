@@ -22,6 +22,14 @@ import {
   getAgentRunSteps,
   createAgentRunStep,
   updateAgentRunStepStatus,
+  getAgentMessages,
+  createAgentMessage,
+  getHumanApprovals,
+  createHumanApproval,
+  updateHumanApprovalStatus,
+  getAgentToolCalls,
+  createAgentToolCall,
+  updateAgentToolCallStatus,
   type Task,
   type TaskStatus,
   type AgentProfile,
@@ -31,6 +39,12 @@ import {
   type AgentRunStep,
   type AgentRunStatus,
   type AgentRunStepStatus,
+  type AgentMessage,
+  type AgentMessageRole,
+  type HumanApproval,
+  type HumanApprovalStatus,
+  type AgentToolCall,
+  type AgentToolCallStatus,
 } from "@/lib/api";
 
 const mockAgentProfiles: AgentProfile[] = [
@@ -119,6 +133,70 @@ const mockAgentRunSteps: AgentRunStep[] = [
     position: 1,
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
+  },
+];
+
+const mockAgentMessages: AgentMessage[] = [
+  {
+    id: "m1",
+    run_id: "r1",
+    step_id: "s1",
+    profile_id: "p1",
+    role: "assistant",
+    content: "I'll help you implement this feature.",
+    metadata: { model: "gpt-4" },
+    created_at: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "m2",
+    run_id: "r1",
+    role: "user",
+    content: "Please review the changes.",
+    created_at: "2024-01-01T00:00:00Z",
+  },
+];
+
+const mockHumanApprovals: HumanApproval[] = [
+  {
+    id: "a1",
+    run_id: "r1",
+    step_id: "s2",
+    approval_type: "step_execution",
+    status: "pending",
+    request_notes: "Need approval before executing this step.",
+    created_at: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "a2",
+    run_id: "r1",
+    approval_type: "run_completion",
+    status: "approved",
+    decided_by: "user123",
+    decision_notes: "Looks good.",
+    created_at: "2024-01-01T00:00:00Z",
+    decided_at: "2024-01-02T00:00:00Z",
+  },
+];
+
+const mockAgentToolCalls: AgentToolCall[] = [
+  {
+    id: "tc1",
+    run_id: "r1",
+    step_id: "s1",
+    tool_name: "read_file",
+    input: { path: "src/main.go" },
+    output: { content: "package main\n\nfunc main() {}" },
+    status: "completed",
+    created_at: "2024-01-01T00:00:00Z",
+    completed_at: "2024-01-01T00:00:01Z",
+  },
+  {
+    id: "tc2",
+    run_id: "r1",
+    tool_name: "bash",
+    input: { command: "git status" },
+    status: "recorded",
+    created_at: "2024-01-01T00:00:00Z",
   },
 ];
 
@@ -351,6 +429,102 @@ const handlers = [
     }
     return HttpResponse.json({ error: "Not found" }, { status: 404 });
   }),
+
+  http.get(`${API_BASE_URL}/agent-runs/:id/messages`, ({ params }) => {
+    const messages = mockAgentMessages.filter((m) => m.run_id === params.id);
+    return HttpResponse.json({ data: messages });
+  }),
+
+  http.post(`${API_BASE_URL}/agent-runs/:id/messages`, async ({ params, request }) => {
+    const body = (await request.json()) as {
+      step_id?: string;
+      profile_id?: string;
+      role: AgentMessageRole;
+      content: string;
+      metadata?: Record<string, unknown>;
+    };
+    const newMessage: AgentMessage = {
+      id: "m3",
+      run_id: params.id as string,
+      step_id: body.step_id,
+      profile_id: body.profile_id,
+      role: body.role,
+      content: body.content,
+      metadata: body.metadata,
+      created_at: "2024-01-03T00:00:00Z",
+    };
+    return HttpResponse.json({ data: newMessage }, { status: 201 });
+  }),
+
+  http.get(`${API_BASE_URL}/agent-runs/:id/approvals`, ({ params }) => {
+    const approvals = mockHumanApprovals.filter((a) => a.run_id === params.id);
+    return HttpResponse.json({ data: approvals });
+  }),
+
+  http.post(`${API_BASE_URL}/agent-runs/:id/approvals`, async ({ params, request }) => {
+    const body = (await request.json()) as {
+      task_id?: string;
+      step_id?: string;
+      approval_type: string;
+      status?: HumanApprovalStatus;
+      request_notes?: string;
+    };
+    const newApproval: HumanApproval = {
+      id: "a3",
+      run_id: params.id as string,
+      task_id: body.task_id,
+      step_id: body.step_id,
+      approval_type: body.approval_type,
+      status: body.status || "pending",
+      request_notes: body.request_notes,
+      created_at: "2024-01-03T00:00:00Z",
+    };
+    return HttpResponse.json({ data: newApproval }, { status: 201 });
+  }),
+
+  http.patch(`${API_BASE_URL}/human-approvals/:id/status`, async ({ params, request }) => {
+    const body = (await request.json()) as { status: HumanApprovalStatus };
+    const approval = mockHumanApprovals.find((a) => a.id === params.id);
+    if (approval) {
+      return HttpResponse.json({ data: { ...approval, status: body.status } });
+    }
+    return HttpResponse.json({ error: "Not found" }, { status: 404 });
+  }),
+
+  http.get(`${API_BASE_URL}/agent-runs/:id/tool-calls`, ({ params }) => {
+    const toolCalls = mockAgentToolCalls.filter((tc) => tc.run_id === params.id);
+    return HttpResponse.json({ data: toolCalls });
+  }),
+
+  http.post(`${API_BASE_URL}/agent-runs/:id/tool-calls`, async ({ params, request }) => {
+    const body = (await request.json()) as {
+      step_id?: string;
+      tool_name: string;
+      input?: Record<string, unknown>;
+      output?: Record<string, unknown>;
+      status?: AgentToolCallStatus;
+    };
+    const newToolCall: AgentToolCall = {
+      id: "tc3",
+      run_id: params.id as string,
+      step_id: body.step_id,
+      tool_name: body.tool_name,
+      input: body.input,
+      output: body.output,
+      status: body.status || "recorded",
+      created_at: "2024-01-03T00:00:00Z",
+    };
+    return HttpResponse.json({ data: newToolCall }, { status: 201 });
+  }),
+
+  http.patch(`${API_BASE_URL}/agent-tool-calls/:id/status`, async ({ params, request }) => {
+    const body = (await request.json()) as { status: AgentToolCallStatus };
+    const toolCall = mockAgentToolCalls.find((tc) => tc.id === params.id);
+    if (toolCall) {
+      return HttpResponse.json({ data: { ...toolCall, status: body.status } });
+    }
+    return HttpResponse.json({ error: "Not found" }, { status: 404 });
+  }),
 ];
 
 const server = setupServer(...handlers);
@@ -549,6 +723,102 @@ describe("API Functions", () => {
     it("updates step status", async () => {
       const step = await updateAgentRunStepStatus("s1", "completed");
       expect(step.status).toBe("completed");
+    });
+  });
+
+  describe("getAgentMessages", () => {
+    it("fetches messages for an agent run", async () => {
+      const messages = await getAgentMessages("r1");
+      expect(messages).toHaveLength(2);
+      expect(messages[0].id).toBe("m1");
+      expect(messages[0].role).toBe("assistant");
+    });
+  });
+
+  describe("createAgentMessage", () => {
+    it("creates a new agent message", async () => {
+      const message = await createAgentMessage("r1", {
+        role: "assistant",
+        content: "New message content",
+        step_id: "s1",
+        profile_id: "p1",
+        metadata: { key: "value" },
+      });
+      expect(message.id).toBe("m3");
+      expect(message.run_id).toBe("r1");
+      expect(message.role).toBe("assistant");
+      expect(message.content).toBe("New message content");
+      expect(message.step_id).toBe("s1");
+      expect(message.profile_id).toBe("p1");
+      expect(message.metadata).toEqual({ key: "value" });
+    });
+  });
+
+  describe("getHumanApprovals", () => {
+    it("fetches approvals for an agent run", async () => {
+      const approvals = await getHumanApprovals("r1");
+      expect(approvals).toHaveLength(2);
+      expect(approvals[0].id).toBe("a1");
+      expect(approvals[0].status).toBe("pending");
+    });
+  });
+
+  describe("createHumanApproval", () => {
+    it("creates a new human approval", async () => {
+      const approval = await createHumanApproval("r1", {
+        approval_type: "test_approval",
+        step_id: "s1",
+        status: "pending",
+        request_notes: "Test request",
+      });
+      expect(approval.id).toBe("a3");
+      expect(approval.run_id).toBe("r1");
+      expect(approval.approval_type).toBe("test_approval");
+      expect(approval.step_id).toBe("s1");
+      expect(approval.status).toBe("pending");
+      expect(approval.request_notes).toBe("Test request");
+    });
+  });
+
+  describe("updateHumanApprovalStatus", () => {
+    it("updates approval status", async () => {
+      const approval = await updateHumanApprovalStatus("a1", "approved");
+      expect(approval.status).toBe("approved");
+    });
+  });
+
+  describe("getAgentToolCalls", () => {
+    it("fetches tool calls for an agent run", async () => {
+      const toolCalls = await getAgentToolCalls("r1");
+      expect(toolCalls).toHaveLength(2);
+      expect(toolCalls[0].id).toBe("tc1");
+      expect(toolCalls[0].tool_name).toBe("read_file");
+    });
+  });
+
+  describe("createAgentToolCall", () => {
+    it("creates a new agent tool call", async () => {
+      const toolCall = await createAgentToolCall("r1", {
+        tool_name: "test_tool",
+        step_id: "s1",
+        input: { param: "value" },
+        output: { result: "success" },
+        status: "completed",
+      });
+      expect(toolCall.id).toBe("tc3");
+      expect(toolCall.run_id).toBe("r1");
+      expect(toolCall.tool_name).toBe("test_tool");
+      expect(toolCall.step_id).toBe("s1");
+      expect(toolCall.input).toEqual({ param: "value" });
+      expect(toolCall.output).toEqual({ result: "success" });
+      expect(toolCall.status).toBe("completed");
+    });
+  });
+
+  describe("updateAgentToolCallStatus", () => {
+    it("updates tool call status", async () => {
+      const toolCall = await updateAgentToolCallStatus("tc1", "failed");
+      expect(toolCall.status).toBe("failed");
     });
   });
 });

@@ -9,7 +9,6 @@ import {
 } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { ToolCallStatusBadge } from './AgentRunBadges'
 import { ToolCallStatusSelector } from './ToolCallStatusSelector'
 import { AddToolCallForm } from './AddToolCallForm'
 import { formatDate } from '@/lib/utils'

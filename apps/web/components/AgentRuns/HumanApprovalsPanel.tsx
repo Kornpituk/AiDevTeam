@@ -9,7 +9,6 @@ import {
 } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { ApprovalStatusBadge } from './AgentRunBadges'
 import { ApprovalStatusSelector } from './ApprovalStatusSelector'
 import { AddHumanApprovalForm } from './AddHumanApprovalForm'
 import { formatDate } from '@/lib/utils'
