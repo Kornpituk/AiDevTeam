@@ -39,12 +39,8 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
   const [error, setError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<'start' | 'cancel' | null>(null)
 
-  const isRunningStatus = (status: AgentRunStatus): boolean => {
-    return status === 'running'
-  }
-
   useEffect(() => {
-    async function fetchData() {
+    async function fetchInitialData() {
       try {
         const [runData, stepsData, profilesData, teamsData] = await Promise.all([
           getAgentRun(runId),
@@ -69,42 +65,37 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
       }
     }
 
-    fetchData()
+    fetchInitialData()
+  }, [runId])
+
+  useEffect(() => {
+    if (run?.status !== 'running') {
+      return
+    }
 
     let intervalId: NodeJS.Timeout | null = null
 
-    const startPolling = () => {
-      intervalId = setInterval(async () => {
-        try {
-          const [runData, stepsData] = await Promise.all([
-            getAgentRun(runId),
-            getAgentRunSteps(runId),
-          ])
-          setRun(runData)
-          setSteps(stepsData)
-
-          if (!isRunningStatus(runData.status)) {
-            if (intervalId) {
-              clearInterval(intervalId)
-              intervalId = null
-            }
-          }
-        } catch (err) {
-          console.error('Polling error:', err)
-        }
-      }, 3000)
+    async function pollData() {
+      try {
+        const [runData, stepsData] = await Promise.all([
+          getAgentRun(runId),
+          getAgentRunSteps(runId),
+        ])
+        setRun(runData)
+        setSteps(stepsData)
+      } catch (err) {
+        console.error('Polling error:', err)
+      }
     }
 
-    if (run && isRunningStatus(run.status)) {
-      startPolling()
-    }
+    intervalId = setInterval(pollData, 3000)
 
     return () => {
       if (intervalId) {
         clearInterval(intervalId)
       }
     }
-  }, [runId, run])
+  }, [runId, run?.status])
 
   async function handleStartRun() {
     if (!run) return

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/llm"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
@@ -23,19 +25,44 @@ type OrchestratorRepository interface {
 }
 
 type Orchestrator struct {
-	repo   OrchestratorRepository
-	llm    llm.LLMProvider
-	cancel context.CancelFunc
+	repo    OrchestratorRepository
+	llm     llm.LLMProvider
+	running map[string]context.CancelFunc
+	mu      sync.Mutex
 }
 
 func NewOrchestrator(repo OrchestratorRepository, llmProvider llm.LLMProvider) *Orchestrator {
 	return &Orchestrator{
-		repo: repo,
-		llm:  llmProvider,
+		repo:    repo,
+		llm:     llmProvider,
+		running: make(map[string]context.CancelFunc),
 	}
 }
 
-func (o *Orchestrator) StartRun(ctx context.Context, runID string) error {
+func mapMemberRoleToStepType(role string) string {
+	roleLower := strings.ToLower(role)
+	switch roleLower {
+	case "planner", "plan":
+		return "plan"
+	case "implementer", "backend", "frontend", "database":
+		return "implement"
+	case "reviewer", "review":
+		return "review"
+	case "qa", "test":
+		return "test"
+	default:
+		return "implement"
+	}
+}
+
+func (o *Orchestrator) StartRun(_ context.Context, runID string) error {
+	o.mu.Lock()
+	if _, exists := o.running[runID]; exists {
+		o.mu.Unlock()
+		return fmt.Errorf("run is already running")
+	}
+	o.mu.Unlock()
+
 	run, err := o.repo.GetRunByID(runID)
 	if err != nil {
 		return fmt.Errorf("failed to get run: %w", err)
@@ -51,20 +78,30 @@ func (o *Orchestrator) StartRun(ctx context.Context, runID string) error {
 		return fmt.Errorf("run is not in startable state: %s", run.Status)
 	}
 
+	existingSteps, err := o.repo.GetStepsByRunID(runID)
+	if err != nil {
+		return fmt.Errorf("failed to check existing steps: %w", err)
+	}
+
+	if len(existingSteps) == 0 && run.TeamID != "" {
+		err = o.createStepsFromTeam(runID, run.TeamID, run.Goal)
+		if err != nil {
+			return fmt.Errorf("failed to create steps from team: %w", err)
+		}
+	}
+
 	_, err = o.repo.UpdateRunStatus(runID, "running")
 	if err != nil {
 		return fmt.Errorf("failed to update run status to running: %w", err)
 	}
 
-	if run.TeamID != "" {
-		err = o.createStepsFromTeam(runID, run.TeamID, run.Goal)
-		if err != nil {
-			_, _ = o.repo.UpdateRunStatus(runID, "failed")
-			return fmt.Errorf("failed to create steps from team: %w", err)
-		}
-	}
+	executionCtx, cancel := context.WithCancel(context.Background())
 
-	go o.executeRun(ctx, runID)
+	o.mu.Lock()
+	o.running[runID] = cancel
+	o.mu.Unlock()
+
+	go o.executeRun(executionCtx, runID)
 
 	return nil
 }
@@ -81,10 +118,7 @@ func (o *Orchestrator) createStepsFromTeam(runID string, teamID string, runGoal 
 			return err
 		}
 
-		stepType := member.MemberRole
-		if stepType == "" {
-			stepType = "agent"
-		}
+		stepType := mapMemberRoleToStepType(member.MemberRole)
 
 		title := fmt.Sprintf("%s - %s", profile.Name, profile.Role)
 		instructions := fmt.Sprintf("Run Goal: %s\n\nProfile System Prompt:\n%s", runGoal, profile.SystemPrompt)
@@ -109,6 +143,22 @@ func (o *Orchestrator) createStepsFromTeam(runID string, teamID string, runGoal 
 }
 
 func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
+	defer func() {
+		o.mu.Lock()
+		if cancel, exists := o.running[runID]; exists {
+			cancel()
+			delete(o.running, runID)
+		}
+		o.mu.Unlock()
+	}()
+
+	select {
+	case <-ctx.Done():
+		_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+		return
+	default:
+	}
+
 	steps, err := o.repo.GetStepsByRunID(runID)
 	if err != nil {
 		_, _ = o.repo.UpdateRunStatus(runID, "failed")
@@ -117,6 +167,7 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 
 	if len(steps) == 0 {
 		_, _ = o.repo.UpdateRunStatus(runID, "completed")
+		_, _ = o.repo.UpdateRunSummary(runID, "Run completed: no steps to execute.")
 		return
 	}
 
@@ -176,6 +227,13 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 		}
 		_ = o.repo.CreateMessage(message)
 
+		select {
+		case <-ctx.Done():
+			_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+			return
+		default:
+		}
+
 		_, err = o.repo.MarkStepCompleted(step.ID, response)
 		if err != nil {
 			_, _ = o.repo.UpdateRunStatus(runID, "failed")
@@ -183,6 +241,13 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 		}
 
 		stepOutputs = append(stepOutputs, response)
+	}
+
+	select {
+	case <-ctx.Done():
+		_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+		return
+	default:
 	}
 
 	_, _ = o.repo.UpdateRunStatus(runID, "completed")
@@ -201,9 +266,12 @@ func (o *Orchestrator) CancelRun(runID string) error {
 		return fmt.Errorf("run is already in a terminal state: %s", run.Status)
 	}
 
-	if o.cancel != nil {
-		o.cancel()
+	o.mu.Lock()
+	if cancel, exists := o.running[runID]; exists {
+		cancel()
+		delete(o.running, runID)
 	}
+	o.mu.Unlock()
 
 	_, err = o.repo.UpdateRunStatus(runID, "cancelled")
 	if err != nil {

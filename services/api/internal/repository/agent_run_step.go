@@ -102,15 +102,17 @@ func (r *AgentRunStepRepository) GetByID(id string) (*model.AgentRunStep, error)
 	query := `SELECT id, run_id, profile_id, step_type, status, title, instructions, output, position, started_at, completed_at, created_at, updated_at FROM agent_run_steps WHERE id = $1`
 	var step model.AgentRunStep
 	var profileID sql.NullString
+	var stepType sql.NullString
 	var instructions sql.NullString
 	var output sql.NullString
 	var startedAt sql.NullTime
 	var completedAt sql.NullTime
-	err := r.db.QueryRow(query, id).Scan(&step.ID, &step.RunID, &profileID, &step.Status, &step.Title, &instructions, &output, &step.Position, &startedAt, &completedAt, &step.CreatedAt, &step.UpdatedAt)
+	err := r.db.QueryRow(query, id).Scan(&step.ID, &step.RunID, &profileID, &stepType, &step.Status, &step.Title, &instructions, &output, &step.Position, &startedAt, &completedAt, &step.CreatedAt, &step.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	step.ProfileID = profileID.String
+	step.StepType = stepType.String
 	step.Instructions = instructions.String
 	step.Output = output.String
 	if startedAt.Valid {
@@ -128,6 +130,7 @@ func (r *AgentRunStepRepository) UpdateOutput(id string, status string, output s
 	query := `UPDATE agent_run_steps SET status = $1, output = $2, updated_at = NOW() WHERE id = $3 RETURNING id, run_id, profile_id, step_type, status, title, instructions, output, position, started_at, completed_at, created_at, updated_at`
 	var step model.AgentRunStep
 	var profileID sql.NullString
+	var stepType sql.NullString
 	var instructions sql.NullString
 	var outputResult sql.NullString
 	var startedAt sql.NullTime
@@ -137,11 +140,12 @@ func (r *AgentRunStepRepository) UpdateOutput(id string, status string, output s
 	} else {
 		outputResult = sql.NullString{String: output, Valid: true}
 	}
-	err := r.db.QueryRow(query, status, outputResult, id).Scan(&step.ID, &step.RunID, &profileID, &step.Status, &step.Title, &instructions, &outputResult, &step.Position, &startedAt, &completedAt, &step.CreatedAt, &step.UpdatedAt)
+	err := r.db.QueryRow(query, status, outputResult, id).Scan(&step.ID, &step.RunID, &profileID, &stepType, &step.Status, &step.Title, &instructions, &outputResult, &step.Position, &startedAt, &completedAt, &step.CreatedAt, &step.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	step.ProfileID = profileID.String
+	step.StepType = stepType.String
 	step.Instructions = instructions.String
 	step.Output = outputResult.String
 	if startedAt.Valid {
@@ -159,15 +163,17 @@ func (r *AgentRunStepRepository) MarkStarted(id string) (*model.AgentRunStep, er
 	query := `UPDATE agent_run_steps SET status = 'running', started_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING id, run_id, profile_id, step_type, status, title, instructions, output, position, started_at, completed_at, created_at, updated_at`
 	var step model.AgentRunStep
 	var profileID sql.NullString
+	var stepType sql.NullString
 	var instructions sql.NullString
 	var output sql.NullString
 	var startedAt sql.NullTime
 	var completedAt sql.NullTime
-	err := r.db.QueryRow(query, id).Scan(&step.ID, &step.RunID, &profileID, &step.Status, &step.Title, &instructions, &output, &step.Position, &startedAt, &completedAt, &step.CreatedAt, &step.UpdatedAt)
+	err := r.db.QueryRow(query, id).Scan(&step.ID, &step.RunID, &profileID, &stepType, &step.Status, &step.Title, &instructions, &output, &step.Position, &startedAt, &completedAt, &step.CreatedAt, &step.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	step.ProfileID = profileID.String
+	step.StepType = stepType.String
 	step.Instructions = instructions.String
 	step.Output = output.String
 	if startedAt.Valid {
@@ -185,6 +191,7 @@ func (r *AgentRunStepRepository) MarkCompleted(id string, output string) (*model
 	query := `UPDATE agent_run_steps SET status = 'completed', output = $1, completed_at = NOW(), updated_at = NOW() WHERE id = $2 RETURNING id, run_id, profile_id, step_type, status, title, instructions, output, position, started_at, completed_at, created_at, updated_at`
 	var step model.AgentRunStep
 	var profileID sql.NullString
+	var stepType sql.NullString
 	var instructions sql.NullString
 	var outputResult sql.NullString
 	var startedAt sql.NullTime
@@ -194,11 +201,12 @@ func (r *AgentRunStepRepository) MarkCompleted(id string, output string) (*model
 	} else {
 		outputResult = sql.NullString{String: output, Valid: true}
 	}
-	err := r.db.QueryRow(query, outputResult, id).Scan(&step.ID, &step.RunID, &profileID, &step.Status, &step.Title, &instructions, &outputResult, &step.Position, &startedAt, &completedAt, &step.CreatedAt, &step.UpdatedAt)
+	err := r.db.QueryRow(query, outputResult, id).Scan(&step.ID, &step.RunID, &profileID, &stepType, &step.Status, &step.Title, &instructions, &outputResult, &step.Position, &startedAt, &completedAt, &step.CreatedAt, &step.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	step.ProfileID = profileID.String
+	step.StepType = stepType.String
 	step.Instructions = instructions.String
 	step.Output = outputResult.String
 	if startedAt.Valid {
@@ -216,6 +224,7 @@ func (r *AgentRunStepRepository) MarkFailed(id string, output string) (*model.Ag
 	query := `UPDATE agent_run_steps SET status = 'failed', output = $1, completed_at = NOW(), updated_at = NOW() WHERE id = $2 RETURNING id, run_id, profile_id, step_type, status, title, instructions, output, position, started_at, completed_at, created_at, updated_at`
 	var step model.AgentRunStep
 	var profileID sql.NullString
+	var stepType sql.NullString
 	var instructions sql.NullString
 	var outputResult sql.NullString
 	var startedAt sql.NullTime
@@ -225,11 +234,12 @@ func (r *AgentRunStepRepository) MarkFailed(id string, output string) (*model.Ag
 	} else {
 		outputResult = sql.NullString{String: output, Valid: true}
 	}
-	err := r.db.QueryRow(query, outputResult, id).Scan(&step.ID, &step.RunID, &profileID, &step.Status, &step.Title, &instructions, &outputResult, &step.Position, &startedAt, &completedAt, &step.CreatedAt, &step.UpdatedAt)
+	err := r.db.QueryRow(query, outputResult, id).Scan(&step.ID, &step.RunID, &profileID, &stepType, &step.Status, &step.Title, &instructions, &outputResult, &step.Position, &startedAt, &completedAt, &step.CreatedAt, &step.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	step.ProfileID = profileID.String
+	step.StepType = stepType.String
 	step.Instructions = instructions.String
 	step.Output = outputResult.String
 	if startedAt.Valid {

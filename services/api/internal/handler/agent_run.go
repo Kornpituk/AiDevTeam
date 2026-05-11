@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 
@@ -133,10 +132,7 @@ func (h *AgentRunHandler) StartAgentRun(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-
-	err := h.orchestrator.StartRun(ctx, id)
+	err := h.orchestrator.StartRun(nil, id)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
