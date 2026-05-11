@@ -355,3 +355,164 @@ export async function updateAgentRunStepStatus(
     body: JSON.stringify({ status }),
   });
 }
+
+export type AgentMessageRole =
+  | "system"
+  | "user"
+  | "assistant"
+  | "tool"
+  | "reviewer";
+
+export const AGENT_MESSAGE_ROLES: AgentMessageRole[] = [
+  "system",
+  "user",
+  "assistant",
+  "tool",
+  "reviewer",
+];
+
+export interface AgentMessage {
+  id: string;
+  run_id: string;
+  step_id?: string;
+  profile_id?: string;
+  role: AgentMessageRole;
+  content: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+export type HumanApprovalStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "cancelled";
+
+export const HUMAN_APPROVAL_STATUSES: HumanApprovalStatus[] = [
+  "pending",
+  "approved",
+  "rejected",
+  "cancelled",
+];
+
+export interface HumanApproval {
+  id: string;
+  task_id?: string;
+  run_id?: string;
+  step_id?: string;
+  approval_type: string;
+  status: HumanApprovalStatus;
+  requested_by?: string;
+  decided_by?: string;
+  request_notes?: string;
+  decision_notes?: string;
+  created_at: string;
+  decided_at?: string;
+}
+
+export type AgentToolCallStatus =
+  | "recorded"
+  | "approved"
+  | "rejected"
+  | "completed"
+  | "failed";
+
+export const AGENT_TOOL_CALL_STATUSES: AgentToolCallStatus[] = [
+  "recorded",
+  "approved",
+  "rejected",
+  "completed",
+  "failed",
+];
+
+export interface AgentToolCall {
+  id: string;
+  run_id: string;
+  step_id?: string;
+  tool_name: string;
+  input?: Record<string, unknown>;
+  output?: Record<string, unknown>;
+  status: AgentToolCallStatus;
+  created_at: string;
+  completed_at?: string;
+}
+
+export async function getAgentMessages(runId: string): Promise<AgentMessage[]> {
+  return fetchApi<AgentMessage[]>(`/agent-runs/${runId}/messages`);
+}
+
+export async function createAgentMessage(
+  runId: string,
+  data: {
+    step_id?: string;
+    profile_id?: string;
+    role: AgentMessageRole;
+    content: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<AgentMessage> {
+  return fetchApi<AgentMessage>(`/agent-runs/${runId}/messages`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getHumanApprovals(runId: string): Promise<HumanApproval[]> {
+  return fetchApi<HumanApproval[]>(`/agent-runs/${runId}/approvals`);
+}
+
+export async function createHumanApproval(
+  runId: string,
+  data: {
+    task_id?: string;
+    step_id?: string;
+    approval_type: string;
+    status?: HumanApprovalStatus;
+    request_notes?: string;
+  }
+): Promise<HumanApproval> {
+  return fetchApi<HumanApproval>(`/agent-runs/${runId}/approvals`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateHumanApprovalStatus(
+  approvalId: string,
+  status: HumanApprovalStatus
+): Promise<HumanApproval> {
+  return fetchApi<HumanApproval>(`/human-approvals/${approvalId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function getAgentToolCalls(runId: string): Promise<AgentToolCall[]> {
+  return fetchApi<AgentToolCall[]>(`/agent-runs/${runId}/tool-calls`);
+}
+
+export async function createAgentToolCall(
+  runId: string,
+  data: {
+    step_id?: string;
+    tool_name: string;
+    input?: Record<string, unknown>;
+    output?: Record<string, unknown>;
+    status?: AgentToolCallStatus;
+  }
+): Promise<AgentToolCall> {
+  return fetchApi<AgentToolCall>(`/agent-runs/${runId}/tool-calls`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateAgentToolCallStatus(
+  toolCallId: string,
+  status: AgentToolCallStatus
+): Promise<AgentToolCall> {
+  return fetchApi<AgentToolCall>(`/agent-tool-calls/${toolCallId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}

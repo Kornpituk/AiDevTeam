@@ -82,6 +82,7 @@ func NewServer(cfg *config.Config) *Server {
 	stepRepo := repository.NewAgentRunStepRepository(db)
 	messageRepo := repository.NewAgentMessageRepository(db)
 	approvalRepo := repository.NewHumanApprovalRepository(db)
+	toolCallRepo := repository.NewAgentToolCallRepository(db)
 
 	taskHandler := handler.NewTaskHandler(taskRepo)
 	eventHandler := handler.NewEventHandler(eventRepo)
@@ -92,6 +93,7 @@ func NewServer(cfg *config.Config) *Server {
 	stepHandler := handler.NewAgentRunStepHandler(stepRepo)
 	messageHandler := handler.NewAgentMessageHandler(messageRepo)
 	approvalHandler := handler.NewHumanApprovalHandler(approvalRepo)
+	toolCallHandler := handler.NewAgentToolCallHandler(toolCallRepo)
 
 	router := mux.NewRouter()
 
@@ -148,6 +150,11 @@ func NewServer(cfg *config.Config) *Server {
 	router.HandleFunc("/agent-runs/{id}/approvals", approvalHandler.CreateApproval).Methods("POST")
 	router.HandleFunc("/agent-runs/{id}/approvals", approvalHandler.GetApprovals).Methods("GET")
 	router.HandleFunc("/human-approvals/{id}/status", approvalHandler.UpdateApprovalStatus).Methods("PATCH")
+
+	// Agent Tool Calls
+	router.HandleFunc("/agent-runs/{id}/tool-calls", toolCallHandler.CreateToolCall).Methods("POST")
+	router.HandleFunc("/agent-runs/{id}/tool-calls", toolCallHandler.GetToolCalls).Methods("GET")
+	router.HandleFunc("/agent-tool-calls/{id}/status", toolCallHandler.UpdateToolCallStatus).Methods("PATCH")
 
 	return &Server{
 		cfg:    cfg,

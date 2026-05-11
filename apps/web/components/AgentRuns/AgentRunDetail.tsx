@@ -14,9 +14,12 @@ import {
 } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { RunStatusBadge, StepStatusBadge } from './AgentRunBadges'
+import { RunStatusBadge } from './AgentRunBadges'
 import { RunStepsList } from './RunStepsList'
 import { AddRunStepForm } from './AddRunStepForm'
+import { AgentMessagesPanel } from './AgentMessagesPanel'
+import { HumanApprovalsPanel } from './HumanApprovalsPanel'
+import { ToolCallsPanel } from './ToolCallsPanel'
 import { formatDate } from '@/lib/utils'
 
 interface AgentRunDetailProps {
@@ -169,38 +172,60 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base">
-              Steps ({steps.length})
-            </CardTitle>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowAddStep(!showAddStep)}
-            >
-              {showAddStep ? 'Cancel' : '+ Add Step'}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {showAddStep && (
-            <AddRunStepForm
-              runId={runId}
-              profiles={profiles}
-              onAdd={handleStepAdded}
-              onCancel={() => setShowAddStep(false)}
-            />
-          )}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-6">
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">
+                  Steps ({steps.length})
+                </CardTitle>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowAddStep(!showAddStep)}
+                >
+                  {showAddStep ? 'Cancel' : '+ Add Step'}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {showAddStep && (
+                <AddRunStepForm
+                  runId={runId}
+                  profiles={profiles}
+                  onAdd={handleStepAdded}
+                  onCancel={() => setShowAddStep(false)}
+                />
+              )}
 
-          <RunStepsList
+              <RunStepsList
+                steps={steps}
+                profiles={profiles}
+                onStatusChange={handleStatusChange}
+              />
+            </CardContent>
+          </Card>
+
+          <AgentMessagesPanel
+            runId={runId}
             steps={steps}
             profiles={profiles}
-            onStatusChange={handleStatusChange}
           />
-        </CardContent>
-      </Card>
+        </div>
+
+        <div className="space-y-6">
+          <HumanApprovalsPanel
+            runId={runId}
+            steps={steps}
+          />
+
+          <ToolCallsPanel
+            runId={runId}
+            steps={steps}
+          />
+        </div>
+      </div>
     </div>
   )
 }
