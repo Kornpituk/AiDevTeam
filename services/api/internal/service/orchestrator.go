@@ -13,6 +13,7 @@ import (
 type OrchestratorRepository interface {
 	GetRunByID(id string) (*model.AgentRun, error)
 	UpdateRunStatus(id string, status string) (*model.AgentRun, error)
+	UpdateRunStatusIfIn(id string, newStatus string, allowedStatuses []string) (*model.AgentRun, error)
 	GetTeamMembers(teamID string) ([]model.AgentTeamMember, error)
 	GetProfileByID(id string) (*model.AgentProfile, error)
 	CreateStep(step *model.AgentRunStep) error
@@ -56,43 +57,28 @@ func mapMemberRoleToStepType(role string) string {
 }
 
 func (o *Orchestrator) StartRun(_ context.Context, runID string) error {
-	o.mu.Lock()
-	if _, exists := o.running[runID]; exists {
-		o.mu.Unlock()
-		return fmt.Errorf("run is already running")
-	}
-	o.mu.Unlock()
-
 	run, err := o.repo.GetRunByID(runID)
 	if err != nil {
 		return fmt.Errorf("failed to get run: %w", err)
 	}
 
-	validStartStatuses := map[string]bool{
-		"draft":           true,
-		"planned":         true,
-		"waiting_approval": true,
-		"approved":        true,
-	}
-	if !validStartStatuses[run.Status] {
-		return fmt.Errorf("run is not in startable state: %s", run.Status)
-	}
-
-	existingSteps, err := o.repo.GetStepsByRunID(runID)
-	if err != nil {
-		return fmt.Errorf("failed to check existing steps: %w", err)
-	}
-
-	if len(existingSteps) == 0 && run.TeamID != "" {
-		err = o.createStepsFromTeam(runID, run.TeamID, run.Goal)
+	if run.TeamID != "" {
+		existingSteps, err := o.repo.GetStepsByRunID(runID)
 		if err != nil {
-			return fmt.Errorf("failed to create steps from team: %w", err)
+			return fmt.Errorf("failed to check existing steps: %w", err)
+		}
+		if len(existingSteps) == 0 {
+			err = o.createStepsFromTeam(runID, run.TeamID, run.Goal)
+			if err != nil {
+				return fmt.Errorf("failed to create steps from team: %w", err)
+			}
 		}
 	}
 
-	_, err = o.repo.UpdateRunStatus(runID, "running")
+	allowedStatuses := []string{"draft", "planned", "waiting_approval", "approved"}
+	_, err = o.repo.UpdateRunStatusIfIn(runID, "running", allowedStatuses)
 	if err != nil {
-		return fmt.Errorf("failed to update run status to running: %w", err)
+		return fmt.Errorf("failed to start run: %w", err)
 	}
 
 	executionCtx, cancel := context.WithCancel(context.Background())
@@ -155,6 +141,7 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 	select {
 	case <-ctx.Done():
 		_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+		_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
 		return
 	default:
 	}
@@ -171,25 +158,67 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 		return
 	}
 
+	var pending, completed, skipped, failed []model.AgentRunStep
+	for _, step := range steps {
+		switch step.Status {
+		case "pending":
+			pending = append(pending, step)
+		case "completed":
+			completed = append(completed, step)
+		case "skipped":
+			skipped = append(skipped, step)
+		case "failed":
+			failed = append(failed, step)
+		}
+	}
+
+	if len(failed) > 0 {
+		_, _ = o.repo.UpdateRunStatus(runID, "failed")
+		_, _ = o.repo.UpdateRunSummary(runID, "Run failed: found existing failed step(s). Cannot continue execution.")
+		return
+	}
+
+	if len(pending) == 0 {
+		_, _ = o.repo.UpdateRunStatus(runID, "completed")
+		summary := fmt.Sprintf("Run completed: no pending steps to execute. (Completed: %d, Skipped: %d, Failed: 0)", len(completed), len(skipped))
+		_, _ = o.repo.UpdateRunSummary(runID, summary)
+		return
+	}
+
 	var stepOutputs []string
 
-	for _, step := range steps {
+	for _, step := range completed {
+		stepOutputs = append(stepOutputs, step.Output)
+	}
+
+	for _, step := range pending {
 		select {
 		case <-ctx.Done():
 			_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+			_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
 			return
 		default:
 		}
 
 		_, err := o.repo.MarkStepStarted(step.ID)
 		if err != nil {
+			if ctx.Err() != nil {
+				_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+				_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
+				return
+			}
 			_, _ = o.repo.UpdateRunStatus(runID, "failed")
 			return
 		}
 
 		profile, err := o.repo.GetProfileByID(step.ProfileID)
 		if err != nil {
-			_, _ = o.repo.MarkStepFailed(step.ID, fmt.Sprintf("Failed to get profile: %v", err))
+			if ctx.Err() != nil {
+				_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+				_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
+				return
+			}
+			_, _ = o.repo.MarkStepFailed(step.ID, "Failed to get profile")
 			_, _ = o.repo.UpdateRunStatus(runID, "failed")
 			return
 		}
@@ -212,7 +241,12 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 
 		response, err := o.llm.ChatCompletion(ctx, messages)
 		if err != nil {
-			_, _ = o.repo.MarkStepFailed(step.ID, fmt.Sprintf("LLM call failed: %v", err))
+			if ctx.Err() != nil {
+				_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+				_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
+				return
+			}
+			_, _ = o.repo.MarkStepFailed(step.ID, "Run failed: error during step execution.")
 			_, _ = o.repo.UpdateRunStatus(runID, "failed")
 			return
 		}
@@ -230,12 +264,18 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 		select {
 		case <-ctx.Done():
 			_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+			_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
 			return
 		default:
 		}
 
 		_, err = o.repo.MarkStepCompleted(step.ID, response)
 		if err != nil {
+			if ctx.Err() != nil {
+				_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+				_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
+				return
+			}
 			_, _ = o.repo.UpdateRunStatus(runID, "failed")
 			return
 		}
@@ -246,13 +286,14 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 	select {
 	case <-ctx.Done():
 		_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+		_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
 		return
 	default:
 	}
 
 	_, _ = o.repo.UpdateRunStatus(runID, "completed")
 
-	summary := fmt.Sprintf("Run completed successfully. Executed %d steps.", len(steps))
+	summary := fmt.Sprintf("Run completed successfully. Executed %d steps.", len(pending))
 	_, _ = o.repo.UpdateRunSummary(runID, summary)
 }
 

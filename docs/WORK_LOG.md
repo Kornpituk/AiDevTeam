@@ -134,26 +134,97 @@
 
 ---
 
-## Current Status
+## Phase C: Auto Orchestration MVP
 
-### Next Step: Phase C
+### Phase C.1.1: Runtime Correctness Fixes
 
-**Phase C**: Auto Orchestration MVP
+**Status**: ✅ Complete
 
-**Goal**: Enable automatic execution of agent runs through an orchestration engine.
+**Goal**: Fix runtime correctness issues in Phase C orchestration MVP before hardening.
 
-**Phases in Phase C**:
-- **C.1**: Orchestrator Core - state transitions, step creation from team
-- **C.2**: LLM Provider Interface - abstraction for calling LLMs
-- **C.3**: Execution Loop - step execution, tool stubs
-- **C.4**: Dashboard Controls - start/cancel UI, polling
-- **C.5**: Guardrails and Tests - safety, test coverage
+**Issues Fixed**:
+1. **Background context cancellation bug** - Orchestrator now uses `context.Background()` instead of request context
+2. **Cancel not stopping execution** - Added `running map[string]context.CancelFunc` with `sync.Mutex` for per-run cancellation
+3. **AgentRunStepRepository scan bugs** - Fixed missing `step_type` column in `GetByID`, `UpdateOutput`, `MarkStarted`, `MarkCompleted`, `MarkFailed`
+4. **Duplicate step creation** - `StartRun()` now checks `GetStepsByRunID()` before creating steps from team
+5. **Step type mapping** - Added `mapMemberRoleToStepType()` with proper role mapping (planner→plan, etc.)
+6. **Frontend polling useEffect loop** - Split initial data load and polling into separate `useEffect`s; polls only when `run.status === 'running'`
 
-See `docs/PHASE_C_PLAN.md` for full details.
+### Phase C.1.2: Orchestration Hardening
+
+**Status**: ✅ Complete
+
+**Goal**: Harden existing Phase C orchestration engine for MVP/demo use.
+
+**Issues Fixed**:
+1. **Execute only pending steps** (`orchestrator.go` `executeRun()`):
+   - Categorizes steps at start: `pending`, `completed`, `skipped`, `failed`
+   - Executes ONLY `status == "pending"` steps
+   - Preserves `completed`/`skipped` steps untouched
+   - Fails immediately if ANY `failed` steps exist at start
+   - If no pending steps (only completed/skipped), marks run `completed` with descriptive summary
+   - Includes outputs from already `completed` steps in `previousOutputs` context
+
+2. **Atomic DB status transition for concurrent start safety** (`repository/agent_run.go`):
+   - Added `UpdateRunStatusIfIn(id, newStatus, allowedStatuses)` method
+   - Uses Postgres `status = ANY($3)` with `pq.Array()` for atomic check+update
+   - Returns clear error if no row updated (status not in allowed set)
+   - `StartRun()` now registers in running map ONLY AFTER successful DB transition
+   - Removed racy in-memory-only check; DB is source of truth
+
+3. **Cancel not overwritten by context.Canceled** (`orchestrator.go` `executeRun()`):
+   - All error paths now check `ctx.Err()` FIRST
+   - If context is cancelled (`ctx.Err() != nil`), marks run as `cancelled` (NOT `failed`)
+   - Writes summary: "Run cancelled."
+   - Applies to: LLM errors, `MarkStepStarted` errors, `GetProfileByID` errors, `MarkStepCompleted` errors
+
+4. **Clearer terminal summaries** (`orchestrator.go`):
+   - **Completed with executed steps**: "Run completed successfully. Executed X steps."
+   - **Completed with no pending steps**: "Run completed: no pending steps to execute. (Completed: X, Skipped: Y, Failed: 0)"
+   - **Failed due to existing failed step**: "Run failed: found existing failed step(s). Cannot continue execution."
+   - **Failed during execution**: "Run failed: error during step execution." (sanitized, no raw errors)
+   - **Cancelled**: "Run cancelled."
+
+5. **Test coverage** (`orchestrator_test.go`):
+   - `TestExecuteRun_CompletedStepsNotRerun`: Completed steps preserved, pending executed
+   - `TestExecuteRun_SkippedStepsNotRerun`: Skipped steps preserved, pending executed
+   - `TestExecuteRun_ExistingFailedStepFailsRun`: Fails immediately with summary
+   - `TestExecuteRun_NoPendingStepsCompletes`: Completes without LLM calls, counts summary
+   - `TestExecuteRun_CancelledDuringLLM_MarksCancelled`: Context cancel → `cancelled` status, not `failed`
+   - `TestStartRun_AtomicStatusTransition`: Fails when status not allowed; running map only populated on success
 
 ---
 
-## Open Risks
+## Current Status
+
+### Next Step: User Demo / Further Phases
+
+**Phase C**: Auto Orchestration MVP - Core Complete
+
+**Completed Phases in C**:
+- **C.1.1**: Runtime Correctness Fixes
+- **C.1.2**: Orchestration Hardening
+
+**Core Functionality Now Available**:
+- ✅ Start/cancel endpoints (`POST /agent-runs/:id/start`, `POST /agent-runs/:id/cancel`)
+- ✅ Atomic status transitions (prevents concurrent double-starts)
+- ✅ Only pending steps executed (completed/skipped preserved)
+- ✅ Existing failed steps fail the run immediately
+- ✅ Context cancellation properly marks as `cancelled` (not `failed`)
+- ✅ Clear terminal summaries
+- ✅ Dashboard polling (every 3s while `running`)
+- ✅ Start/Cancel buttons in UI
+
+**Limitations (Intentional for MVP)**:
+- No WebSocket (polling only)
+- No distributed queue (in-memory goroutines only)
+- No real dangerous tool execution
+- No automatic codebase modification
+- No authentication
+
+---
+
+## Open Risks (Resolved)
 
 1. **AGENTS.md previously blocked AI automation**
    - OLD: "Do not add AI automation yet."
@@ -174,24 +245,24 @@ See `docs/PHASE_C_PLAN.md` for full details.
    - @leader coordinates
    - Each agent stays within their scope
 
-4. **Phase C should avoid scope creep**
-   - Mitigation: `docs/PHASE_C_PLAN.md` clearly defines:
-     - What's in scope
-     - What's out of scope
-     - Acceptance criteria
-     - Implementation order
+4. **Phase C runtime correctness issues**
+   - FIXED: Phase C.1.1 addressed all 7 known issues
+
+5. **Phase C hardening gaps**
+   - FIXED: Phase C.1.2 addressed all 5 hardening issues with test coverage
 
 ---
 
-## Latest Verification (After Phase B.2.3.1)
+## Latest Verification (After Phase C.1.2)
 
 ### Backend
-- `go test ./...` → All passing (cached)
+- `go test ./...` → All passing
+- Orchestrator tests: ~40 tests covering all hardening scenarios
 
 ### Frontend
-- `npm run test:run` → 52 tests passing
+- `npm run test:run` → 54 tests passing
 - `npm run lint` → No warnings/errors
-- `npm run build` → Success
+- `npm run build` → Success (9 static pages generated)
 
 ### Database
 - 2 migrations applied:
@@ -200,6 +271,10 @@ See `docs/PHASE_C_PLAN.md` for full details.
 
 ### Key Endpoints Available
 See `docs/CURRENT_STATUS.md` for full list.
+
+### Key Phase C Endpoints
+- `POST /agent-runs/:id/start` - Start run execution
+- `POST /agent-runs/:id/cancel` - Cancel run execution
 
 ---
 

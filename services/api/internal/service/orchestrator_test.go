@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -151,6 +152,27 @@ func (m *mockOrchestratorRepo) MarkStepFailed(id string, output string) (*model.
 	return &model.AgentRunStep{ID: id, Status: "failed", Output: output}, nil
 }
 
+func (m *mockOrchestratorRepo) UpdateRunStatusIfIn(id string, newStatus string, allowedStatuses []string) (*model.AgentRun, error) {
+	if m.updateStatusErr != nil {
+		return nil, m.updateStatusErr
+	}
+	if m.run != nil {
+		allowed := false
+		for _, s := range allowedStatuses {
+			if m.run.Status == s {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, errors.New("run is not in startable state")
+		}
+		m.statusHistory = append(m.statusHistory, newStatus)
+		m.run.Status = newStatus
+	}
+	return m.run, nil
+}
+
 func (m *mockOrchestratorRepo) CreateMessage(message *model.AgentMessage) error {
 	return m.createMessageErr
 }
@@ -217,27 +239,6 @@ func TestMapMemberRoleToStepType(t *testing.T) {
 				t.Errorf("mapMemberRoleToStepType(%q) = %q, want %q", tt.role, got, tt.expectedType)
 			}
 		})
-	}
-}
-
-func TestStartRun_RejectsAlreadyRunning(t *testing.T) {
-	repo := newMockOrchestratorRepo()
-	repo.run = &model.AgentRun{
-		ID:     testRunID,
-		Status: "draft",
-	}
-
-	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
-
-	_, cancel := context.WithCancel(context.Background())
-	orch.mu.Lock()
-	orch.running[testRunID] = cancel
-	orch.mu.Unlock()
-
-	err := orch.StartRun(context.Background(), testRunID)
-	if err == nil {
-		t.Error("StartRun should return error when run is already running")
 	}
 }
 
@@ -599,4 +600,289 @@ func TestMultipleRuns_CanRunConcurrently(t *testing.T) {
 	if err2 != nil {
 		t.Errorf("Second run start failed: %v", err2)
 	}
+}
+
+func TestExecuteRun_CompletedStepsNotRerun(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	now := time.Now()
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:          testStepID,
+			RunID:       testRunID,
+			ProfileID:   testProfileID,
+			StepType:    "plan",
+			Status:      "completed",
+			Position:    1,
+			Output:      "Existing completed output",
+			CompletedAt: &now,
+		},
+		{
+			ID:          testStepID2,
+			RunID:       testRunID,
+			ProfileID:   testProfileID,
+			StepType:    "implement",
+			Status:      "pending",
+			Position:    2,
+		},
+	}
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(repo, fakeLLM)
+
+	orch.executeRun(context.Background(), testRunID)
+
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "completed" {
+		t.Errorf("Expected final status 'completed', got %q", lastStatus)
+	}
+
+	if repo.steps[0].Status != "completed" {
+		t.Errorf("Completed step should remain 'completed', got %q", repo.steps[0].Status)
+	}
+
+	if repo.steps[1].Status != "completed" {
+		t.Errorf("Pending step should now be 'completed', got %q", repo.steps[1].Status)
+	}
+}
+
+func TestExecuteRun_SkippedStepsNotRerun(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "skipped",
+			Position:  1,
+		},
+		{
+			ID:        testStepID2,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "implement",
+			Status:    "pending",
+			Position:  2,
+		},
+	}
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(repo, fakeLLM)
+
+	orch.executeRun(context.Background(), testRunID)
+
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "completed" {
+		t.Errorf("Expected final status 'completed', got %q", lastStatus)
+	}
+
+	if repo.steps[0].Status != "skipped" {
+		t.Errorf("Skipped step should remain 'skipped', got %q", repo.steps[0].Status)
+	}
+
+	if repo.steps[1].Status != "completed" {
+		t.Errorf("Pending step should now be 'completed', got %q", repo.steps[1].Status)
+	}
+}
+
+func TestExecuteRun_ExistingFailedStepFailsRun(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	now := time.Now()
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:          testStepID,
+			RunID:       testRunID,
+			ProfileID:   testProfileID,
+			StepType:    "plan",
+			Status:      "failed",
+			Position:    1,
+			Output:      "Previous failure",
+			CompletedAt: &now,
+		},
+		{
+			ID:        testStepID2,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "implement",
+			Status:    "pending",
+			Position:  2,
+		},
+	}
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(repo, fakeLLM)
+
+	orch.executeRun(context.Background(), testRunID)
+
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "failed" {
+		t.Errorf("Expected final status 'failed', got %q", lastStatus)
+	}
+
+	if repo.steps[1].Status != "pending" {
+		t.Errorf("Pending step should NOT have been executed, got %q", repo.steps[1].Status)
+	}
+
+	if !strings.Contains(repo.run.Summary, "existing failed step") {
+		t.Errorf("Summary should mention existing failed step, got: %q", repo.run.Summary)
+	}
+}
+
+func TestExecuteRun_NoPendingStepsCompletes(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	now := time.Now()
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:          testStepID,
+			RunID:       testRunID,
+			ProfileID:   testProfileID,
+			StepType:    "plan",
+			Status:      "completed",
+			Position:    1,
+			Output:      "Step 1 output",
+			CompletedAt: &now,
+		},
+		{
+			ID:          testStepID2,
+			RunID:       testRunID,
+			ProfileID:   testProfileID,
+			StepType:    "review",
+			Status:      "skipped",
+			Position:    2,
+			CompletedAt: &now,
+		},
+	}
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(repo, fakeLLM)
+
+	orch.executeRun(context.Background(), testRunID)
+
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "completed" {
+		t.Errorf("Expected final status 'completed', got %q", lastStatus)
+	}
+
+	if !strings.Contains(repo.run.Summary, "Completed: 1") {
+		t.Errorf("Summary should mention Completed count, got: %q", repo.run.Summary)
+	}
+	if !strings.Contains(repo.run.Summary, "Skipped: 1") {
+		t.Errorf("Summary should mention Skipped count, got: %q", repo.run.Summary)
+	}
+}
+
+func TestExecuteRun_CancelledDuringLLM_MarksCancelled(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+
+	blockingLLM := newBlockingFakeLLM()
+	orch := NewOrchestrator(repo, blockingLLM)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		orch.executeRun(ctx, testRunID)
+	}()
+
+	<-time.After(50 * time.Millisecond)
+	cancel()
+	wg.Wait()
+
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "cancelled" {
+		t.Errorf("Expected final status 'cancelled', got %q. History: %v", lastStatus, repo.statusHistory)
+	}
+
+	if !strings.Contains(repo.run.Summary, "Run cancelled") {
+		t.Errorf("Summary should say 'Run cancelled.', got: %q", repo.run.Summary)
+	}
+}
+
+func TestStartRun_AtomicStatusTransition(t *testing.T) {
+	t.Run("fails when status not allowed", func(t *testing.T) {
+		repo := newMockOrchestratorRepo()
+		repo.run = &model.AgentRun{
+			ID:     testRunID,
+			Status: "running",
+		}
+
+		fakeLLM := llm.NewFakeProvider()
+		orch := NewOrchestrator(repo, fakeLLM)
+
+		err := orch.StartRun(context.Background(), testRunID)
+		if err == nil {
+			t.Error("StartRun should fail when run is already running")
+		}
+
+		orch.mu.Lock()
+		_, exists := orch.running[testRunID]
+		orch.mu.Unlock()
+		if exists {
+			t.Error("Running map should NOT be populated when transition fails")
+		}
+	})
+
+	t.Run("succeeds when status is allowed", func(t *testing.T) {
+		repo := newMockOrchestratorRepo()
+		repo.run = &model.AgentRun{
+			ID:     testRunID,
+			Status: "draft",
+		}
+		repo.steps = []model.AgentRunStep{}
+
+		fakeLLM := llm.NewFakeProvider()
+		orch := NewOrchestrator(repo, fakeLLM)
+
+		err := orch.StartRun(context.Background(), testRunID)
+		if err != nil {
+			t.Fatalf("StartRun should succeed for draft status: %v", err)
+		}
+
+		orch.mu.Lock()
+		cancel, exists := orch.running[testRunID]
+		orch.mu.Unlock()
+		if !exists {
+			t.Error("Running map SHOULD be populated when transition succeeds")
+		}
+
+		cancel()
+		<-time.After(50 * time.Millisecond)
+
+		orch.mu.Lock()
+		delete(orch.running, testRunID)
+		orch.mu.Unlock()
+	})
 }

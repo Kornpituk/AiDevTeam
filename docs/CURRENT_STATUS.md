@@ -1,6 +1,6 @@
 # Current Status
 
-## What Exists Now (as of Phase B.2.3.1)
+## What Exists Now (as of Phase C.1.2)
 
 ### Backend Stack
 
@@ -75,6 +75,8 @@ human_approvals       - Approval gates (task_id, run_id, step_id, approval_type,
 - `POST /tasks/:id/agent-runs` - Create run
 - `GET /tasks/:id/agent-runs` - List runs by task
 - `GET /agent-runs/:id` - Get run detail
+- `POST /agent-runs/:id/start` - Start run execution (Phase C)
+- `POST /agent-runs/:id/cancel` - Cancel run execution (Phase C)
 
 #### Agent Run Steps
 - `POST /agent-runs/:id/steps` - Create step
@@ -126,68 +128,75 @@ components/
     ToolCallStatusSelector.tsx - Tool call status dropdown
 ```
 
+### Phase C Capabilities (Now Implemented)
+
+#### Orchestrator Core (services/api/internal/service/orchestrator.go)
+- **StartRun**: Atomically transitions run status, creates steps from team if needed, registers in running map
+- **executeRun**: Executes only `pending` steps; preserves `completed`/`skipped` steps; fails immediately on existing `failed` steps
+- **CancelRun**: Calls stored cancel function, updates status to `cancelled`
+- **State safety**: Atomic database status transition using `status = ANY($3)`; concurrent starts blocked at DB level
+- **Context cancellation handling**: All error paths check `ctx.Err()` first; marks as `cancelled` (not `failed`) when context is done
+- **Step type mapping**: `planner`→`plan`, `implementer/backend/frontend/database`→`implement`, `reviewer`→`review`, `qa`→`test`, default→`implement`
+- **Clear summaries**: Terminal outcomes have descriptive summaries in `run.summary`
+
+#### LLM Provider Interface (services/api/internal/llm/)
+- `LLMProvider` interface with `ChatCompletion(ctx, messages)`
+- `FakeProvider` implementation for testing
+- `OpenAIProvider` implementation (stubbed/configurable)
+
+#### Dashboard Controls (apps/web/)
+- **Start Run** / **Cancel Run** buttons in run detail page
+- **Polling**: Auto-refreshes run data every 3 seconds while run status is `running`
+- **API functions**: `startAgentRun()`, `cancelAgentRun()`
+
 ### Latest Verification Status
 
-Last verified after Phase B.2.3.1:
+Last verified after Phase C.1.2:
 
-- **Backend tests**: `go test ./...` → All passing (cached)
-- **Frontend tests**: `npm run test:run` → 52 tests passing
-  - `components/ui/badge.test.ts` (8 tests)
-  - `lib/utils.test.ts` (5 tests)
-  - `components/ui/card.test.tsx` (4 tests)
-  - `components/ui/button.test.tsx` (7 tests)
-  - `lib/api.test.ts` (28 tests) - covers messages, approvals, tool calls
+- **Backend tests**: `go test ./...` → All passing
+- **Backend test count**: ~40 orchestrator tests (role mapping, status validation, pending-only execution, existing-failed fail-fast, cancellation handling, atomic transitions, multi-run concurrency)
+- **Frontend tests**: `npm run test:run` → 54 tests passing
 - **Frontend lint**: `npm run lint` → No ESLint warnings or errors
 - **Frontend build**: `npm run build` → Success (9 static pages generated)
 
 ---
 
-## What Does NOT Exist Yet (Phase C)
+## What Does NOT Exist Yet
 
-### Auto Orchestration Engine
+### Not Implemented (Out of Scope for MVP)
 
-1. **No orchestrator core**: No component that:
-   - Takes a run and determines what steps to create
-   - Reads team members and creates steps from them
-   - Manages step transitions based on dependencies
-
-2. **No LLM provider interface**: No abstraction for calling LLMs (OpenAI, Anthropic, etc.)
-
-3. **No execution loop**: No background worker/poller that:
-   - Checks for pending/running runs
-   - Executes steps in order
-   - Calls LLM for step execution
-   - Records messages and tool calls
-   - Updates step/run status
-
-### Missing Endpoints
-
-- `POST /agent-runs/:id/start` - Start execution of a run
 - `POST /agent-runs/:id/pause` - Pause execution
 - `POST /agent-runs/:id/resume` - Resume execution
-- `POST /agent-runs/:id/cancel` - Cancel execution
 
-### Missing Dashboard Controls
+### Limitations (By Design for MVP)
 
-- No "Start Run" button in UI
-- No "Pause" / "Resume" / "Cancel" controls
-- No execution progress visualization beyond status badges
-- No polling for live updates (optional for MVP)
+#### No WebSocket Real-time Updates
+- Dashboard uses polling (3-second interval) only while run is `running`
+- No WebSocket or SSE push notifications
 
-### Missing Configuration
+#### No Distributed Queue
+- Execution is in-memory goroutine per run
+- No Redis, RabbitMQ, or external job queue
+- Runs don't survive process restart
 
-- No LLM provider config in backend
-- No environment variables for API keys (should not be committed)
-- No model selection per run/step
-
-### Missing Real Tool Execution
-
-- Tool calls are currently just database records
+#### No Real Dangerous Tool Execution
+- Tool calls are database records only
 - No actual execution of:
-  - File read/write
+  - File write (read may be added later)
   - Bash commands
-  - Git operations
-  - Web requests
+  - Git operations that modify state
+  - Web requests that modify external systems
+
+#### No Automatic Codebase Modification by AI
+- All AI execution must be explicitly planned, scoped, and approved
+- Phase C MVP focuses on orchestration, not actual code modification
+
+#### No Authentication
+- No user accounts, login, OAuth, JWT, or permission systems
+
+#### No LLM API Keys in Repository
+- All config must come from environment variables
+- `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL`
 
 ---
 

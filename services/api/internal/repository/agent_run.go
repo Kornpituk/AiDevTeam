@@ -2,8 +2,10 @@ package repository
 
 import (
 	"database/sql"
+	"fmt"
 
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
+	"github.com/lib/pq"
 )
 
 type AgentRunRepository struct {
@@ -85,6 +87,25 @@ func (r *AgentRunRepository) UpdateStatus(id string, status string) (*model.Agen
 	var goal sql.NullString
 	var summary sql.NullString
 	err := r.db.QueryRow(query, status, id).Scan(&run.ID, &run.TaskID, &teamID, &run.Status, &goal, &summary, &run.CreatedAt, &run.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	run.TeamID = teamID.String
+	run.Goal = goal.String
+	run.Summary = summary.String
+	return &run, nil
+}
+
+func (r *AgentRunRepository) UpdateRunStatusIfIn(id string, newStatus string, allowedStatuses []string) (*model.AgentRun, error) {
+	query := `UPDATE agent_runs SET status = $1, updated_at = NOW() WHERE id = $2 AND status = ANY($3) RETURNING id, task_id, team_id, status, goal, summary, created_at, updated_at`
+	var run model.AgentRun
+	var teamID sql.NullString
+	var goal sql.NullString
+	var summary sql.NullString
+	err := r.db.QueryRow(query, newStatus, id, pq.Array(allowedStatuses)).Scan(&run.ID, &run.TaskID, &teamID, &run.Status, &goal, &summary, &run.CreatedAt, &run.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("run is not in startable state")
+	}
 	if err != nil {
 		return nil, err
 	}

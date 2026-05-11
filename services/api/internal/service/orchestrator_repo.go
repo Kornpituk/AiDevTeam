@@ -37,6 +37,10 @@ func (r *OrchestratorRepoImpl) UpdateRunStatus(id string, status string) (*model
 	return r.runRepo.UpdateStatus(id, status)
 }
 
+func (r *OrchestratorRepoImpl) UpdateRunStatusIfIn(id string, newStatus string, allowedStatuses []string) (*model.AgentRun, error) {
+	return r.runRepo.UpdateRunStatusIfIn(id, newStatus, allowedStatuses)
+}
+
 func (r *OrchestratorRepoImpl) GetTeamMembers(teamID string) ([]model.AgentTeamMember, error) {
 	return r.teamMemberRepo.GetByTeamID(teamID)
 }

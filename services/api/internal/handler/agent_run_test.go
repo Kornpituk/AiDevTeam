@@ -369,6 +369,27 @@ func (m *mockOrchestratorRepo) UpdateRunSummary(id string, summary string) (*mod
 	return m.run, nil
 }
 
+func (m *mockOrchestratorRepo) UpdateRunStatusIfIn(id string, newStatus string, allowedStatuses []string) (*model.AgentRun, error) {
+	if m.returnErr != nil {
+		return nil, m.returnErr
+	}
+	if m.run != nil {
+		allowed := false
+		for _, s := range allowedStatuses {
+			if m.run.Status == s {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, errors.New("run is not in startable state")
+		}
+		m.statusHistory = append(m.statusHistory, newStatus)
+		m.run.Status = newStatus
+	}
+	return m.run, nil
+}
+
 type mockLLM struct {
 	responses   []string
 	responseIdx int
