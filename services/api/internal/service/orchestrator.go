@@ -62,19 +62,6 @@ func (o *Orchestrator) StartRun(_ context.Context, runID string) error {
 		return fmt.Errorf("failed to get run: %w", err)
 	}
 
-	if run.TeamID != "" {
-		existingSteps, err := o.repo.GetStepsByRunID(runID)
-		if err != nil {
-			return fmt.Errorf("failed to check existing steps: %w", err)
-		}
-		if len(existingSteps) == 0 {
-			err = o.createStepsFromTeam(runID, run.TeamID, run.Goal)
-			if err != nil {
-				return fmt.Errorf("failed to create steps from team: %w", err)
-			}
-		}
-	}
-
 	allowedStatuses := []string{"draft", "planned", "waiting_approval", "approved"}
 	_, err = o.repo.UpdateRunStatusIfIn(runID, "running", allowedStatuses)
 	if err != nil {
@@ -86,6 +73,31 @@ func (o *Orchestrator) StartRun(_ context.Context, runID string) error {
 	o.mu.Lock()
 	o.running[runID] = cancel
 	o.mu.Unlock()
+
+	if run.TeamID != "" {
+		existingSteps, err := o.repo.GetStepsByRunID(runID)
+		if err != nil {
+			cancel()
+			o.mu.Lock()
+			delete(o.running, runID)
+			o.mu.Unlock()
+			_, _ = o.repo.UpdateRunStatus(runID, "failed")
+			_, _ = o.repo.UpdateRunSummary(runID, "Run failed: failed to check existing steps.")
+			return fmt.Errorf("failed to check existing steps: %w", err)
+		}
+		if len(existingSteps) == 0 {
+			err = o.createStepsFromTeam(runID, run.TeamID, run.Goal)
+			if err != nil {
+				cancel()
+				o.mu.Lock()
+				delete(o.running, runID)
+				o.mu.Unlock()
+				_, _ = o.repo.UpdateRunStatus(runID, "failed")
+				_, _ = o.repo.UpdateRunSummary(runID, "Run failed: failed to create steps from team.")
+				return fmt.Errorf("failed to create steps from team: %w", err)
+			}
+		}
+	}
 
 	go o.executeRun(executionCtx, runID)
 

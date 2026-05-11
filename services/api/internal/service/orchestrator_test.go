@@ -557,6 +557,186 @@ func TestCancelRun_NonTerminalCallsCancelAndUpdatesStatus(t *testing.T) {
 	}
 }
 
+func TestStartRun_NoStepsCreatedOnFailedTransition(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		TeamID: testTeamID,
+		Status: "running",
+	}
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(repo, fakeLLM)
+
+	err := orch.StartRun(context.Background(), testRunID)
+	if err == nil {
+		t.Error("StartRun should fail when run is already running")
+	}
+
+	if len(repo.createdSteps) != 0 {
+		t.Errorf("Expected 0 steps created on failed transition, got %d", len(repo.createdSteps))
+	}
+
+	orch.mu.Lock()
+	_, exists := orch.running[testRunID]
+	orch.mu.Unlock()
+	if exists {
+		t.Error("Running map should NOT be populated when transition fails")
+	}
+}
+
+func TestStartRun_CleansUpOnFailedStepCreation(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		TeamID: testTeamID,
+		Status: "draft",
+		Goal:   "Test goal",
+	}
+	repo.steps = []model.AgentRunStep{}
+	repo.members = []model.AgentTeamMember{
+		{
+			ID:         "member-1",
+			TeamID:     testTeamID,
+			ProfileID:  testProfileID,
+			MemberRole: "planner",
+			Position:   1,
+		},
+	}
+	repo.profiles[testProfileID] = &model.AgentProfile{
+		ID:           testProfileID,
+		Name:         "Planner Agent",
+		Role:         "planner",
+		SystemPrompt: "You plan things.",
+	}
+	repo.createStepErr = errors.New("db error")
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(repo, fakeLLM)
+
+	err := orch.StartRun(context.Background(), testRunID)
+	if err == nil {
+		t.Fatal("StartRun should fail when createStepsFromTeam fails")
+	}
+
+	if repo.run.Status != "failed" {
+		t.Errorf("Expected run status to be 'failed', got %q", repo.run.Status)
+	}
+
+	if !strings.Contains(repo.run.Summary, "failed to create steps") {
+		t.Errorf("Summary should mention step creation failure, got: %q", repo.run.Summary)
+	}
+
+	orch.mu.Lock()
+	_, exists := orch.running[testRunID]
+	orch.mu.Unlock()
+	if exists {
+		t.Error("Running map should be empty after cleanup")
+	}
+
+	foundRunning := false
+	foundFailed := false
+	for _, s := range repo.statusHistory {
+		if s == "running" {
+			foundRunning = true
+		}
+		if s == "failed" {
+			foundFailed = true
+		}
+	}
+	if !foundRunning {
+		t.Error("Status history should contain 'running'")
+	}
+	if !foundFailed {
+		t.Error("Status history should contain 'failed'")
+	}
+}
+
+func TestStartRun_SimulatedConcurrentStart(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		TeamID: testTeamID,
+		Status: "draft",
+		Goal:   "Test goal",
+	}
+	repo.steps = []model.AgentRunStep{}
+	repo.members = []model.AgentTeamMember{
+		{
+			ID:         "member-1",
+			TeamID:     testTeamID,
+			ProfileID:  testProfileID,
+			MemberRole: "planner",
+			Position:   1,
+		},
+	}
+	repo.profiles[testProfileID] = &model.AgentProfile{
+		ID:           testProfileID,
+		Name:         "Planner Agent",
+		Role:         "planner",
+		SystemPrompt: "You plan things.",
+	}
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(repo, fakeLLM)
+
+	err1 := orch.StartRun(context.Background(), testRunID)
+	if err1 != nil {
+		t.Fatalf("First StartRun should succeed: %v", err1)
+	}
+
+	err2 := orch.StartRun(context.Background(), testRunID)
+	if err2 == nil {
+		t.Error("Second StartRun should fail when run is already running")
+	}
+
+	if len(repo.createdSteps) != 1 {
+		t.Errorf("Expected exactly 1 step created, got %d", len(repo.createdSteps))
+	}
+
+	runCount := 0
+	for _, s := range repo.statusHistory {
+		if s == "running" {
+			runCount++
+		}
+	}
+	if runCount != 1 {
+		t.Errorf("Expected exactly 1 'running' transition, got %d. History: %v", runCount, repo.statusHistory)
+	}
+}
+
+func TestStartRun_HappyPathNoTeam(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "draft",
+	}
+	repo.steps = []model.AgentRunStep{}
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(repo, fakeLLM)
+
+	err := orch.StartRun(context.Background(), testRunID)
+	if err != nil {
+		t.Fatalf("StartRun should succeed: %v", err)
+	}
+
+	orch.mu.Lock()
+	_, exists := orch.running[testRunID]
+	orch.mu.Unlock()
+	if !exists {
+		t.Error("Running map should contain runID")
+	}
+
+	if len(repo.createdSteps) != 0 {
+		t.Errorf("Expected 0 steps created, got %d", len(repo.createdSteps))
+	}
+
+	if repo.run.Status != "running" {
+		t.Errorf("Expected status 'running', got %q", repo.run.Status)
+	}
+}
+
 func TestNewOrchestrator_InitializesRunningMap(t *testing.T) {
 	repo := newMockOrchestratorRepo()
 	fakeLLM := llm.NewFakeProvider()

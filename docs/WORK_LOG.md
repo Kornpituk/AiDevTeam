@@ -193,6 +193,42 @@
    - `TestExecuteRun_CancelledDuringLLM_MarksCancelled`: Context cancel → `cancelled` status, not `failed`
    - `TestStartRun_AtomicStatusTransition`: Fails when status not allowed; running map only populated on success
 
+### Phase C.1.2.1: Concurrent Start Ordering Fix
+
+**Status**: ✅ Complete
+
+**Goal**: Fix remaining concurrent start race condition in `StartRun`.
+
+**Problem**:
+Previous order in `StartRun`:
+1. `GetRunByID`
+2. `GetStepsByRunID` + `createStepsFromTeam` (step creation)
+3. `UpdateRunStatusIfIn` (atomic transition)
+
+**Race condition**: Two concurrent `POST /agent-runs/:id/start` requests could both:
+- See no steps
+- Create duplicate steps
+- Only one wins atomic transition
+- Result: duplicate steps in database
+
+**Fix Applied**:
+New safe ordering:
+1. `GetRunByID` → get `TeamID`/`Goal`
+2. **`UpdateRunStatusIfIn`** → atomic transition to `running` FIRST (DB is source of truth)
+3. Register cancel in running map
+4. THEN check existing steps & create from team if needed
+5. **Cleanup on failure after transition**:
+   - If `GetStepsByRunID` fails: `cancel()`, remove from running map, set status `"failed"`, set summary
+   - If `createStepsFromTeam` fails: same cleanup
+   - No `executeRun` goroutine started on failure
+6. Only on full success: `go o.executeRun(...)`
+
+**Tests Added** (`orchestrator_test.go`):
+1. `TestStartRun_NoStepsCreatedOnFailedTransition`: Atomic transition fails → 0 steps created, running map empty
+2. `TestStartRun_CleansUpOnFailedStepCreation`: Step creation fails after transition → status `"failed"`, summary set, running map empty
+3. `TestStartRun_SimulatedConcurrentStart`: Two sequential calls → only 1 set of steps, only 1 "running" transition
+4. `TestStartRun_HappyPathNoTeam`: No-team happy path → running map populated, status="running"
+
 ---
 
 ## Current Status
@@ -204,6 +240,7 @@
 **Completed Phases in C**:
 - **C.1.1**: Runtime Correctness Fixes
 - **C.1.2**: Orchestration Hardening
+- **C.1.2.1**: Concurrent Start Ordering Fix
 
 **Core Functionality Now Available**:
 - ✅ Start/cancel endpoints (`POST /agent-runs/:id/start`, `POST /agent-runs/:id/cancel`)
@@ -251,9 +288,15 @@
 5. **Phase C hardening gaps**
    - FIXED: Phase C.1.2 addressed all 5 hardening issues with test coverage
 
+6. **Concurrent start ordering race condition**
+   - OLD: Step creation happened BEFORE atomic status transition
+   - RACE: Two concurrent requests could both create duplicate steps
+   - FIXED: Phase C.1.2.1 reordered so atomic transition happens FIRST
+   - Added cleanup path if step creation fails after transition
+
 ---
 
-## Latest Verification (After Phase C.1.2)
+## Latest Verification (After Phase C.1.2.1)
 
 ### Backend
 - `go test ./...` → All passing
