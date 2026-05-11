@@ -195,11 +195,11 @@ Last verified after Phase B.2.3.1:
 
 ### Status Enums Used
 
-**TaskStatus**: `pending`, `in_progress`, `completed`, `cancelled`, `failed`
+**TaskStatus**: `pending`, `planning`, `approved`, `in_progress`, `reviewing`, `completed`, `failed`
 
-**AgentRunStatus**: `draft`, `pending`, `running`, `completed`, `failed`, `cancelled`
+**AgentRunStatus**: `draft`, `planned`, `waiting_approval`, `approved`, `running`, `paused`, `completed`, `failed`, `cancelled`
 
-**AgentRunStepStatus**: `pending`, `running`, `completed`, `failed`, `cancelled`, `skipped`
+**AgentRunStepStatus**: `pending`, `waiting_approval`, `running`, `completed`, `failed`, `skipped`, `cancelled`
 
 **AgentMessageRole**: `system`, `user`, `assistant`, `tool`, `reviewer`
 

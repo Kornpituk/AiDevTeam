@@ -36,10 +36,15 @@ You SHOULD COORDINATE with:
 - @backend for backend test changes
 - @frontend for frontend test changes
 
-You SHOULD NOT:
-- Run bash commands for tests and
-- Prefer tests, scripts, docs
-- Ask before modifying production code
+You MAY:
+- Run bash commands for tests, lint, and builds
+
+You SHOULD prefer:
+- Changing tests, scripts, and docs
+
+You MUST:
+- Ask/coordinate before modifying production code
+- Not make broad production changes
 
 ## Testing Commands
 

@@ -69,11 +69,11 @@ See `docs/CURRENT_STATUS.md` for full schema details.
 
 The system uses VARCHAR columns for status fields, not PostgreSQL ENUM types:
 
-**TaskStatus**: `pending`, `in_progress`, `completed`, `cancelled`, `failed`
+**TaskStatus**: `pending`, `planning`, `approved`, `in_progress`, `reviewing`, `completed`, `failed`
 
-**AgentRunStatus**: `draft`, `pending`, `running`, `completed`, `failed`, `cancelled`
+**AgentRunStatus**: `draft`, `planned`, `waiting_approval`, `approved`, `running`, `paused`, `completed`, `failed`, `cancelled`
 
-**AgentRunStepStatus**: `pending`, `running`, `completed`, `failed`, `cancelled`, `skipped`
+**AgentRunStepStatus**: `pending`, `waiting_approval`, `running`, `completed`, `failed`, `skipped`, `cancelled`
 
 **AgentMessageRole**: `system`, `user`, `assistant`, `tool`, `reviewer`
 
@@ -86,7 +86,7 @@ The system uses VARCHAR columns for status fields, not PostgreSQL ENUM types:
 Models are in: `services/api/internal/model/*.go`
 
 Current models:
-- `model/task.go` - Task, Event, Artifact
+- `model/types.go` - Task, TaskEvent, TaskArtifact, JSONB helper
 - `model/orchestration.go` - AgentProfile, AgentTeam, AgentTeamMember, AgentRun, AgentRunStep, AgentMessage, AgentToolCall, HumanApproval
 
 ## Workflow
