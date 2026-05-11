@@ -47,6 +47,7 @@ For full documentation, see:
 
 - [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) - Product vision, goals, non-goals
 - [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md) - What exists, what doesn't, API reference
+- [docs/DEMO_RUNBOOK.md](docs/DEMO_RUNBOOK.md) - Step-by-step demo guide with setup instructions
 - [docs/PHASE_C_PLAN.md](docs/PHASE_C_PLAN.md) - Detailed plan for auto orchestration
 - [docs/AGENT_TEAM.md](docs/AGENT_TEAM.md) - Agent definitions, ownership, coordination
 - [docs/WORK_LOG.md](docs/WORK_LOG.md) - History, current status, next steps

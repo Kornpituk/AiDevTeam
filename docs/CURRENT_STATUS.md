@@ -1,6 +1,6 @@
 # Current Status
 
-## What Exists Now (as of Phase C.1.2)
+## What Exists Now (as of Phase C.1.3)
 
 ### Backend Stack
 
@@ -139,25 +139,44 @@ components/
 - **Step type mapping**: `planner`→`plan`, `implementer/backend/frontend/database`→`implement`, `reviewer`→`review`, `qa`→`test`, default→`implement`
 - **Clear summaries**: Terminal outcomes have descriptive summaries in `run.summary`
 
+#### Task Context Integration (Phase C.1.3)
+- **Task context included in LLM prompts**:
+  - Task title, description, plan, review_notes
+  - Run goal
+  - Step instructions
+  - Previous step outputs
+- **Structured format**: `=== TASK CONTEXT ===`, `=== RUN GOAL ===`, `=== STEP INSTRUCTIONS ===`, `=== PREVIOUS STEP OUTPUTS ===`
+- **Graceful handling**:
+  - If `run.TaskID` is empty: continues without task context
+  - If task load fails: marks run `failed` with sanitized summary ("Run failed: failed to load task context.")
+
 #### LLM Provider Interface (services/api/internal/llm/)
 - `LLMProvider` interface with `ChatCompletion(ctx, messages)`
-- `FakeProvider` implementation for testing
-- `OpenAIProvider` implementation (stubbed/configurable)
+- **FakeProvider**: No API key required, returns deterministic mock responses for demos
+- **OpenAIProvider**: Configurable via environment variables
+- **Environment configuration**:
+  - `LLM_PROVIDER`: `openai` or `fake` (default: `openai`)
+  - `LLM_API_KEY`: Required when `LLM_PROVIDER=openai`
+  - `LLM_MODEL`: Model name (default: `gpt-4`)
+  - `LLM_BASE_URL`: Custom API base URL for OpenAI-compatible endpoints
+  - `LLM_TIMEOUT`: Request timeout (Go duration format, default: `60s`)
 
 #### Dashboard Controls (apps/web/)
 - **Start Run** / **Cancel Run** buttons in run detail page
 - **Polling**: Auto-refreshes run data every 3 seconds while run status is `running`
+- **Refresh Button**: Manual Refresh button in Agent Messages panel
 - **API functions**: `startAgentRun()`, `cancelAgentRun()`
 
 ### Latest Verification Status
 
-Last verified after Phase C.1.2:
+Last verified after Phase C.1.3:
 
 - **Backend tests**: `go test ./...` → All passing
-- **Backend test count**: ~40 orchestrator tests (role mapping, status validation, pending-only execution, existing-failed fail-fast, cancellation handling, atomic transitions, multi-run concurrency)
+- **Backend test count**: ~43 orchestrator tests (role mapping, status validation, pending-only execution, existing-failed fail-fast, cancellation handling, atomic transitions, multi-run concurrency, task context integration)
 - **Frontend tests**: `npm run test:run` → 54 tests passing
 - **Frontend lint**: `npm run lint` → No ESLint warnings or errors
 - **Frontend build**: `npm run build` → Success (9 static pages generated)
+- **Config validation**: `jq empty opencode.json` → Valid JSON
 
 ---
 
