@@ -69,7 +69,7 @@ func (r *HumanApprovalRepository) GetByRunID(runID string) ([]model.HumanApprova
 	}
 	defer rows.Close()
 
-	var approvals []model.HumanApproval
+	approvals := make([]model.HumanApproval, 0)
 	for rows.Next() {
 		var approval model.HumanApproval
 		var taskID sql.NullString

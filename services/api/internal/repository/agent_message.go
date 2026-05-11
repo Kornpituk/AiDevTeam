@@ -45,7 +45,7 @@ func (r *AgentMessageRepository) GetByRunID(runID string) ([]model.AgentMessage,
 	}
 	defer rows.Close()
 
-	var messages []model.AgentMessage
+	messages := make([]model.AgentMessage, 0)
 	for rows.Next() {
 		var message model.AgentMessage
 		var stepID sql.NullString

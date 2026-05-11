@@ -33,7 +33,7 @@ func (r *ArtifactRepository) GetByTaskID(taskID string) ([]model.TaskArtifact, e
 	}
 	defer rows.Close()
 
-	var artifacts []model.TaskArtifact
+	artifacts := make([]model.TaskArtifact, 0)
 	for rows.Next() {
 		var artifact model.TaskArtifact
 		var content sql.NullString

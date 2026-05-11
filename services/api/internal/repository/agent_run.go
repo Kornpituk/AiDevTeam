@@ -47,7 +47,7 @@ func (r *AgentRunRepository) GetByTaskID(taskID string) ([]model.AgentRun, error
 	}
 	defer rows.Close()
 
-	var runs []model.AgentRun
+	runs := make([]model.AgentRun, 0)
 	for rows.Next() {
 		var run model.AgentRun
 		var teamID sql.NullString

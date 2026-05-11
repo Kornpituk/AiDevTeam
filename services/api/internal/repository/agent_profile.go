@@ -45,7 +45,7 @@ func (r *AgentProfileRepository) GetAll() ([]model.AgentProfile, error) {
 	}
 	defer rows.Close()
 
-	var profiles []model.AgentProfile
+	profiles := make([]model.AgentProfile, 0)
 	for rows.Next() {
 		var profile model.AgentProfile
 		var desc sql.NullString

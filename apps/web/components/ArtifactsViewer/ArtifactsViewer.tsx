@@ -9,7 +9,7 @@ import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 interface ArtifactsViewerProps {
-  artifacts: Artifact[];
+  artifacts: Artifact[] | null;
 }
 
 function getArtifactTypeVariant(artifactType: string): "default" | "success" | "warning" | "error" | "info" {
@@ -112,7 +112,9 @@ function ArtifactItem({ artifact }: ArtifactItemProps) {
 }
 
 export function ArtifactsViewer({ artifacts }: ArtifactsViewerProps) {
-  if (artifacts.length === 0) {
+  const safeArtifacts = artifacts ?? [];
+
+  if (safeArtifacts.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -145,12 +147,12 @@ export function ArtifactsViewer({ artifacts }: ArtifactsViewerProps) {
           </svg>
           Artifacts
           <span className="ml-2 px-2 py-0.5 bg-gray-100 text-gray-600 text-xs font-medium rounded-full">
-            {artifacts.length}
+            {safeArtifacts.length}
           </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0 space-y-3">
-        {artifacts.map((artifact) => (
+        {safeArtifacts.map((artifact) => (
           <ArtifactItem key={artifact.id} artifact={artifact} />
         ))}
       </CardContent>

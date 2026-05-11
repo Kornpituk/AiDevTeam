@@ -27,7 +27,7 @@ func (r *AgentTeamMemberRepository) GetByTeamID(teamID string) ([]model.AgentTea
 	}
 	defer rows.Close()
 
-	var members []model.AgentTeamMember
+	members := make([]model.AgentTeamMember, 0)
 	for rows.Next() {
 		var member model.AgentTeamMember
 		if err := rows.Scan(&member.ID, &member.TeamID, &member.ProfileID, &member.MemberRole, &member.Position, &member.CreatedAt); err != nil {

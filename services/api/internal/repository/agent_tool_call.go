@@ -46,7 +46,7 @@ func (r *AgentToolCallRepository) GetByRunID(runID string) ([]model.AgentToolCal
 	}
 	defer rows.Close()
 
-	var toolCalls []model.AgentToolCall
+	toolCalls := make([]model.AgentToolCall, 0)
 	for rows.Next() {
 		var toolCall model.AgentToolCall
 		var stepID sql.NullString

@@ -33,7 +33,7 @@ func (r *EventRepository) GetByTaskID(taskID string) ([]model.TaskEvent, error) 
 	}
 	defer rows.Close()
 
-	var events []model.TaskEvent
+	events := make([]model.TaskEvent, 0)
 	for rows.Next() {
 		var event model.TaskEvent
 		var message sql.NullString

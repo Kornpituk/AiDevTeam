@@ -5,7 +5,7 @@ import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 interface EventsTimelineProps {
-  events: Event[];
+  events: Event[] | null;
 }
 
 function getEventTypeVariant(eventType: string): "default" | "success" | "warning" | "error" | "info" {
@@ -25,7 +25,9 @@ function formatEventType(eventType: string): string {
 }
 
 export function EventsTimeline({ events }: EventsTimelineProps) {
-  if (events.length === 0) {
+  const safeEvents = events ?? [];
+
+  if (safeEvents.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -58,7 +60,7 @@ export function EventsTimeline({ events }: EventsTimelineProps) {
           </svg>
           Events
           <span className="ml-2 px-2 py-0.5 bg-gray-100 text-gray-600 text-xs font-medium rounded-full">
-            {events.length}
+            {safeEvents.length}
           </span>
         </CardTitle>
       </CardHeader>
@@ -67,7 +69,7 @@ export function EventsTimeline({ events }: EventsTimelineProps) {
           <div className="absolute left-4 top-0 bottom-0 w-px bg-gray-200" />
           
           <div className="space-y-0">
-            {events.map((event, index) => (
+            {safeEvents.map((event, index) => (
               <div key={event.id} className="relative pl-10 pb-6 last:pb-0">
                 <div className={cn(
                   "absolute left-2 w-5 h-5 rounded-full border-4 border-white shadow-sm",

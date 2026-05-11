@@ -112,6 +112,10 @@ func NewServer(cfg *config.Config) *Server {
 	router.Use(recoveryMiddleware)
 	router.Use(corsMiddleware)
 
+	router.PathPrefix("/").Methods(http.MethodOptions).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
 	// Health
 	router.HandleFunc("/health", handler.HealthHandler).Methods("GET")
 

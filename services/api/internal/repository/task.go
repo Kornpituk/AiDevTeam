@@ -36,7 +36,7 @@ func (r *TaskRepository) GetAll() ([]model.Task, error) {
 	}
 	defer rows.Close()
 
-	var tasks []model.Task
+	tasks := make([]model.Task, 0)
 	for rows.Next() {
 		var task model.Task
 		var plan sql.NullString

@@ -33,7 +33,7 @@ func (r *AgentTeamRepository) GetAll() ([]model.AgentTeam, error) {
 	}
 	defer rows.Close()
 
-	var teams []model.AgentTeam
+	teams := make([]model.AgentTeam, 0)
 	for rows.Next() {
 		var team model.AgentTeam
 		var desc sql.NullString

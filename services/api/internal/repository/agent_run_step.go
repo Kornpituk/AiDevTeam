@@ -45,7 +45,7 @@ func (r *AgentRunStepRepository) GetByRunID(runID string) ([]model.AgentRunStep,
 	}
 	defer rows.Close()
 
-	var steps []model.AgentRunStep
+	steps := make([]model.AgentRunStep, 0)
 	for rows.Next() {
 		var step model.AgentRunStep
 		var profileID sql.NullString
