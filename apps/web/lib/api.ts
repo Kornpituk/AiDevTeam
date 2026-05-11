@@ -311,6 +311,18 @@ export async function getAgentRun(id: string): Promise<AgentRun> {
   return fetchApi<AgentRun>(`/agent-runs/${id}`);
 }
 
+export async function startAgentRun(id: string): Promise<AgentRun> {
+  return fetchApi<AgentRun>(`/agent-runs/${id}/start`, {
+    method: "POST",
+  });
+}
+
+export async function cancelAgentRun(id: string): Promise<AgentRun> {
+  return fetchApi<AgentRun>(`/agent-runs/${id}/cancel`, {
+    method: "POST",
+  });
+}
+
 export async function createAgentRun(
   taskId: string,
   data: {

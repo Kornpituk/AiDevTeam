@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
 	"github.com/gorilla/mux"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
+	"github.com/Kornpituk/AiDevTeam/services/api/internal/service"
 )
 
 var validRunStatuses = map[string]bool{
@@ -27,11 +29,15 @@ type AgentRunRepository interface {
 }
 
 type AgentRunHandler struct {
-	runRepo AgentRunRepository
+	runRepo      AgentRunRepository
+	orchestrator *service.Orchestrator
 }
 
-func NewAgentRunHandler(runRepo AgentRunRepository) *AgentRunHandler {
-	return &AgentRunHandler{runRepo: runRepo}
+func NewAgentRunHandler(runRepo AgentRunRepository, orchestrator *service.Orchestrator) *AgentRunHandler {
+	return &AgentRunHandler{
+		runRepo:      runRepo,
+		orchestrator: orchestrator,
+	}
 }
 
 func (h *AgentRunHandler) CreateAgentRun(w http.ResponseWriter, r *http.Request) {
@@ -107,6 +113,67 @@ func (h *AgentRunHandler) GetAgentRun(w http.ResponseWriter, r *http.Request) {
 		} else {
 			respondError(w, http.StatusInternalServerError, "Failed to get agent run")
 		}
+		return
+	}
+
+	respondJSON(w, http.StatusOK, run)
+}
+
+func (h *AgentRunHandler) StartAgentRun(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	if !isValidUUID(id) {
+		respondError(w, http.StatusBadRequest, "Invalid agent run ID")
+		return
+	}
+
+	if h.orchestrator == nil {
+		respondError(w, http.StatusInternalServerError, "Orchestrator not initialized")
+		return
+	}
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	err := h.orchestrator.StartRun(ctx, id)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	run, err := h.runRepo.GetByID(id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to get updated run")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, run)
+}
+
+func (h *AgentRunHandler) CancelAgentRun(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	if !isValidUUID(id) {
+		respondError(w, http.StatusBadRequest, "Invalid agent run ID")
+		return
+	}
+
+	if h.orchestrator == nil {
+		respondError(w, http.StatusInternalServerError, "Orchestrator not initialized")
+		return
+	}
+
+	err := h.orchestrator.CancelRun(id)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	run, err := h.runRepo.GetByID(id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to get updated run")
 		return
 	}
 

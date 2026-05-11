@@ -8,7 +8,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/config"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/handler"
+	"github.com/Kornpituk/AiDevTeam/services/api/internal/llm"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/repository"
+	"github.com/Kornpituk/AiDevTeam/services/api/internal/service"
 	_ "github.com/lib/pq"
 )
 
@@ -84,12 +86,21 @@ func NewServer(cfg *config.Config) *Server {
 	approvalRepo := repository.NewHumanApprovalRepository(db)
 	toolCallRepo := repository.NewAgentToolCallRepository(db)
 
+	llmProvider, err := llm.NewProviderFromConfig(cfg.LLM)
+	if err != nil {
+		log.Printf("Warning: failed to initialize LLM provider: %v, using fake provider", err)
+		llmProvider = llm.NewFakeProvider()
+	}
+
+	orchestratorRepo := service.NewOrchestratorRepoImpl(runRepo, stepRepo, teamMemberRepo, profileRepo, messageRepo)
+	orchestrator := service.NewOrchestrator(orchestratorRepo, llmProvider)
+
 	taskHandler := handler.NewTaskHandler(taskRepo)
 	eventHandler := handler.NewEventHandler(eventRepo)
 	artifactHandler := handler.NewArtifactHandler(artifactRepo)
 	profileHandler := handler.NewAgentProfileHandler(profileRepo)
 	teamHandler := handler.NewAgentTeamHandler(teamRepo, teamMemberRepo)
-	runHandler := handler.NewAgentRunHandler(runRepo)
+	runHandler := handler.NewAgentRunHandler(runRepo, orchestrator)
 	stepHandler := handler.NewAgentRunStepHandler(stepRepo)
 	messageHandler := handler.NewAgentMessageHandler(messageRepo)
 	approvalHandler := handler.NewHumanApprovalHandler(approvalRepo)
@@ -136,6 +147,8 @@ func NewServer(cfg *config.Config) *Server {
 	router.HandleFunc("/tasks/{id}/agent-runs", runHandler.CreateAgentRun).Methods("POST")
 	router.HandleFunc("/tasks/{id}/agent-runs", runHandler.GetAgentRunsByTask).Methods("GET")
 	router.HandleFunc("/agent-runs/{id}", runHandler.GetAgentRun).Methods("GET")
+	router.HandleFunc("/agent-runs/{id}/start", runHandler.StartAgentRun).Methods("POST")
+	router.HandleFunc("/agent-runs/{id}/cancel", runHandler.CancelAgentRun).Methods("POST")
 
 	// Agent Run Steps
 	router.HandleFunc("/agent-runs/{id}/steps", stepHandler.CreateRunStep).Methods("POST")

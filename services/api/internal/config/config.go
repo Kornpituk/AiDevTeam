@@ -9,6 +9,7 @@ import (
 type Config struct {
 	Port     string
 	Database DatabaseConfig
+	LLM      LLMConfig
 }
 
 type DatabaseConfig struct {
@@ -21,6 +22,14 @@ type DatabaseConfig struct {
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
 	ConnMaxIdleTime time.Duration
+}
+
+type LLMConfig struct {
+	Provider string
+	APIKey   string
+	Model    string
+	BaseURL  string
+	Timeout  time.Duration
 }
 
 func Load() *Config {
@@ -36,6 +45,13 @@ func Load() *Config {
 			MaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 5),
 			ConnMaxLifetime: getEnvDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
 			ConnMaxIdleTime: getEnvDuration("DB_CONN_MAX_IDLE_TIME", 1*time.Minute),
+		},
+		LLM: LLMConfig{
+			Provider: getEnv("LLM_PROVIDER", "openai"),
+			APIKey:   getEnv("LLM_API_KEY", ""),
+			Model:    getEnv("LLM_MODEL", "gpt-4"),
+			BaseURL:  getEnv("LLM_BASE_URL", ""),
+			Timeout:  getEnvDuration("LLM_TIMEOUT", 60*time.Second),
 		},
 	}
 }

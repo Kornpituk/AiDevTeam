@@ -131,7 +131,7 @@ func TestCreateAgentRun(t *testing.T) {
 			w := httptest.NewRecorder()
 
 			mock := &mockAgentRunRepo{createErr: tt.mockErr}
-			handler := NewAgentRunHandler(mock)
+			handler := NewAgentRunHandler(mock, nil)
 			handler.CreateAgentRun(w, req)
 
 			if w.Code != tt.expectedStatus {
@@ -181,7 +181,7 @@ func TestGetAgentRunsByTask(t *testing.T) {
 			w := httptest.NewRecorder()
 
 			mock := &mockAgentRunRepo{runs: tt.runs, getByTaskIDErr: tt.mockErr}
-			handler := NewAgentRunHandler(mock)
+			handler := NewAgentRunHandler(mock, nil)
 			handler.GetAgentRunsByTask(w, req)
 
 			if w.Code != tt.expectedStatus {
@@ -224,7 +224,7 @@ func TestGetAgentRun(t *testing.T) {
 			w := httptest.NewRecorder()
 
 			mock := &mockAgentRunRepo{runs: tt.runs}
-			handler := NewAgentRunHandler(mock)
+			handler := NewAgentRunHandler(mock, nil)
 			handler.GetAgentRun(w, req)
 
 			if w.Code != tt.expectedStatus {

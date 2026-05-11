@@ -19,6 +19,8 @@ import {
   getAgentRuns,
   getAgentRun,
   createAgentRun,
+  startAgentRun,
+  cancelAgentRun,
   getAgentRunSteps,
   createAgentRunStep,
   updateAgentRunStepStatus,
@@ -525,6 +527,26 @@ const handlers = [
     }
     return HttpResponse.json({ error: "Not found" }, { status: 404 });
   }),
+
+  http.post(`${API_BASE_URL}/agent-runs/:id/start`, ({ params }) => {
+    const run = mockAgentRuns.find((r) => r.id === params.id);
+    if (run) {
+      return HttpResponse.json({
+        data: { ...run, status: "running" as AgentRunStatus },
+      });
+    }
+    return HttpResponse.json({ error: "Not found" }, { status: 404 });
+  }),
+
+  http.post(`${API_BASE_URL}/agent-runs/:id/cancel`, ({ params }) => {
+    const run = mockAgentRuns.find((r) => r.id === params.id);
+    if (run) {
+      return HttpResponse.json({
+        data: { ...run, status: "cancelled" as AgentRunStatus },
+      });
+    }
+    return HttpResponse.json({ error: "Not found" }, { status: 404 });
+  }),
 ];
 
 const server = setupServer(...handlers);
@@ -677,20 +699,36 @@ describe("API Functions", () => {
     });
   });
 
-  describe("createAgentRun", () => {
-    it("creates a new agent run", async () => {
-      const run = await createAgentRun("1", {
-        team_id: "t1",
-        goal: "New run goal",
-        status: "draft",
-      });
-      expect(run.id).toBe("r3");
-      expect(run.task_id).toBe("1");
-      expect(run.team_id).toBe("t1");
-      expect(run.goal).toBe("New run goal");
-      expect(run.status).toBe("draft");
-    });
-  });
+   describe("createAgentRun", () => {
+     it("creates a new agent run", async () => {
+       const run = await createAgentRun("1", {
+         team_id: "t1",
+         goal: "New run goal",
+         status: "draft",
+       });
+       expect(run.id).toBe("r3");
+       expect(run.task_id).toBe("1");
+       expect(run.team_id).toBe("t1");
+       expect(run.goal).toBe("New run goal");
+       expect(run.status).toBe("draft");
+     });
+   });
+
+   describe("startAgentRun", () => {
+     it("starts an agent run", async () => {
+       const run = await startAgentRun("r1");
+       expect(run.id).toBe("r1");
+       expect(run.status).toBe("running");
+     });
+   });
+
+   describe("cancelAgentRun", () => {
+     it("cancels an agent run", async () => {
+       const run = await cancelAgentRun("r2");
+       expect(run.id).toBe("r2");
+       expect(run.status).toBe("cancelled");
+     });
+   });
 
   describe("getAgentRunSteps", () => {
     it("fetches steps for an agent run", async () => {

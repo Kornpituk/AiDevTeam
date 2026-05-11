@@ -7,10 +7,13 @@ import {
   AgentRunStep,
   AgentProfile,
   AgentRunStepStatus,
+  AgentRunStatus,
   getAgentRun,
   getAgentRunSteps,
   getAgentProfiles,
   getAgentTeams,
+  startAgentRun,
+  cancelAgentRun,
 } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -34,6 +37,11 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
   const [loading, setLoading] = useState(true)
   const [showAddStep, setShowAddStep] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [actionLoading, setActionLoading] = useState<'start' | 'cancel' | null>(null)
+
+  const isRunningStatus = (status: AgentRunStatus): boolean => {
+    return status === 'running'
+  }
 
   useEffect(() => {
     async function fetchData() {
@@ -62,7 +70,67 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
     }
 
     fetchData()
-  }, [runId])
+
+    let intervalId: NodeJS.Timeout | null = null
+
+    const startPolling = () => {
+      intervalId = setInterval(async () => {
+        try {
+          const [runData, stepsData] = await Promise.all([
+            getAgentRun(runId),
+            getAgentRunSteps(runId),
+          ])
+          setRun(runData)
+          setSteps(stepsData)
+
+          if (!isRunningStatus(runData.status)) {
+            if (intervalId) {
+              clearInterval(intervalId)
+              intervalId = null
+            }
+          }
+        } catch (err) {
+          console.error('Polling error:', err)
+        }
+      }, 3000)
+    }
+
+    if (run && isRunningStatus(run.status)) {
+      startPolling()
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId)
+      }
+    }
+  }, [runId, run])
+
+  async function handleStartRun() {
+    if (!run) return
+    setActionLoading('start')
+    try {
+      const updatedRun = await startAgentRun(run.id)
+      setRun(updatedRun)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start run')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  async function handleCancelRun() {
+    if (!run) return
+    setActionLoading('cancel')
+    try {
+      const updatedRun = await cancelAgentRun(run.id)
+      setRun(updatedRun)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel run')
+    } finally {
+      setActionLoading(null)
+    }
+  }
 
   function handleStepAdded(step: AgentRunStep) {
     setSteps((prev) => [...prev, step])
@@ -133,23 +201,44 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
         </Link>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <RunStatusBadge status={run.status} />
-                <span className="text-sm text-slate-500">
-                  Run ID: {run.id}
-                </span>
-              </div>
-              <p className="text-sm text-slate-500">Task: {run.task_id}</p>
-              {team && (
-                <p className="text-sm text-slate-500">Team: {team.name}</p>
-              )}
-            </div>
-          </div>
-        </CardHeader>
+       <Card>
+         <CardHeader className="pb-3">
+           <div className="flex items-start justify-between gap-4">
+             <div>
+               <div className="flex items-center gap-3 mb-2">
+                 <RunStatusBadge status={run.status} />
+                 <span className="text-sm text-slate-500">
+                   Run ID: {run.id}
+                 </span>
+               </div>
+               <p className="text-sm text-slate-500">Task: {run.task_id}</p>
+               {team && (
+                 <p className="text-sm text-slate-500">Team: {team.name}</p>
+               )}
+             </div>
+             <div className="flex gap-2">
+               {(run.status === 'draft' || run.status === 'planned' || run.status === 'waiting_approval' || run.status === 'approved') && (
+                 <Button
+                   size="sm"
+                   onClick={handleStartRun}
+                   disabled={actionLoading !== null}
+                 >
+                   {actionLoading === 'start' ? 'Starting...' : 'Start Run'}
+                 </Button>
+               )}
+               {run.status === 'running' && (
+                 <Button
+                   size="sm"
+                   variant="secondary"
+                   onClick={handleCancelRun}
+                   disabled={actionLoading !== null}
+                 >
+                   {actionLoading === 'cancel' ? 'Cancelling...' : 'Cancel Run'}
+                 </Button>
+               )}
+             </div>
+           </div>
+         </CardHeader>
         <CardContent className="space-y-4">
           {run.goal && (
             <div>

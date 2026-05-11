@@ -77,3 +77,35 @@ func (r *AgentRunRepository) GetByID(id string) (*model.AgentRun, error) {
 	run.Summary = summary.String
 	return &run, nil
 }
+
+func (r *AgentRunRepository) UpdateStatus(id string, status string) (*model.AgentRun, error) {
+	query := `UPDATE agent_runs SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING id, task_id, team_id, status, goal, summary, created_at, updated_at`
+	var run model.AgentRun
+	var teamID sql.NullString
+	var goal sql.NullString
+	var summary sql.NullString
+	err := r.db.QueryRow(query, status, id).Scan(&run.ID, &run.TaskID, &teamID, &run.Status, &goal, &summary, &run.CreatedAt, &run.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	run.TeamID = teamID.String
+	run.Goal = goal.String
+	run.Summary = summary.String
+	return &run, nil
+}
+
+func (r *AgentRunRepository) UpdateSummary(id string, summary string) (*model.AgentRun, error) {
+	query := `UPDATE agent_runs SET summary = $1, updated_at = NOW() WHERE id = $2 RETURNING id, task_id, team_id, status, goal, summary, created_at, updated_at`
+	var run model.AgentRun
+	var teamID sql.NullString
+	var goal sql.NullString
+	var summaryResult sql.NullString
+	err := r.db.QueryRow(query, summary, id).Scan(&run.ID, &run.TaskID, &teamID, &run.Status, &goal, &summaryResult, &run.CreatedAt, &run.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	run.TeamID = teamID.String
+	run.Goal = goal.String
+	run.Summary = summaryResult.String
+	return &run, nil
+}
