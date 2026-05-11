@@ -14,5 +14,41 @@
       ".env",
       ".env.local"
     ]
+  },
+  "agent": {
+    "leader": {
+      "mode": "all",
+      "permission": {
+        "task": {
+          "*": "deny",
+          "database": "allow",
+          "backend": "allow",
+          "frontend": "allow",
+          "qa": "allow",
+          "reviewer": "allow"
+        }
+      }
+    },
+    "database": {
+      "mode": "subagent"
+    },
+    "backend": {
+      "mode": "subagent"
+    },
+    "frontend": {
+      "mode": "subagent"
+    },
+    "qa": {
+      "mode": "subagent",
+      "permission": {
+        "bash": "allow"
+      }
+    },
+    "reviewer": {
+      "mode": "subagent",
+      "permission": {
+        "edit": "deny"
+      }
+    }
   }
 }

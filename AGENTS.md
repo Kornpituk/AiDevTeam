@@ -1,17 +1,15 @@
 # AiDevT
 
-AiDevT is an AI Dev Task Dashboard.
+**Agent Orchestration Engine + Dashboard for AI-assisted software development.**
 
 ## Goal
 
-Build a control plane for AI-assisted software development.
-
-The first MVP should allow users to:
-- Create development tasks
-- Store task plans
-- Store review notes
-- Track task status
-- View task events and artifacts
+Build an end-to-end system that allows:
+1. Users to define reusable agent profiles
+2. Users to define agent teams
+3. Users to start an agent run for a task
+4. Backend to automatically execute steps using an orchestration engine
+5. Dashboard to track run status, steps, messages, approvals, tool calls, errors, and summaries
 
 ## Stack
 
@@ -25,82 +23,134 @@ The first MVP should allow users to:
 - `apps/web`: Next.js frontend
 - `services/api`: Go backend API
 - `db/migrations`: SQL migrations
-- `docs`: architecture and workflow docs
+- `docs`: Project documentation
+- `.opencode/agents`: OpenCode agent team definitions
 
 ## Development Rules
 
+- Always read docs/PROJECT_BRIEF.md, docs/CURRENT_STATUS.md, and docs/AGENT_TEAM.md first.
 - Always plan before editing files.
 - Keep patches small.
 - Do not implement multiple phases at once.
 - Do not edit `.env` files.
-- Do not add auth yet.
-- Do not add AI automation yet.
+- Do not add auth yet unless explicitly requested.
 - Do not create destructive database migrations.
 - Do not modify old migrations after they are applied.
-- After code changes, show `git diff`.
+- Show git diff after changes.
 - Backend changes should run `go test ./...`.
 - Frontend changes should run `npm run lint` and `npm run build` when available.
 
-## MVP Phases
+## Phase C: AI Automation Rule
 
-### Phase 1: Database foundation
+**AI automation is allowed only in Phase C work, must be scoped, configurable, tested, and must not hardcode secrets.**
 
-Create:
-- `docker-compose.yml`
-- Postgres service
-- initial SQL migration for tasks, events, and artifacts
-- README instructions
+- No hardcoded API keys or tokens anywhere
+- All LLM config must come from environment variables
+- Execution must be testable without real API calls
+- Guardrails must exist: timeouts, approval gates, error recovery
+- Show git diff after all automation-related changes
 
-Database schema should include:
-- `ai_tasks`
-- `ai_task_events`
-- `ai_task_artifacts`
+## Multi-Agent Work Rules
 
-### Phase 2: Go API
+1. **Read docs first**: Always read `docs/PROJECT_BRIEF.md` and `docs/CURRENT_STATUS.md` before work.
+2. **One leader controls scope**: @leader decides what to work on and when to switch phases.
+3. **Stay within ownership**: Each agent must stay within their defined boundaries (see `docs/AGENT_TEAM.md`).
+4. **Avoid overlapping edits**: Coordinate if multiple agents need to touch the same file.
+5. **No old migration changes**: Never modify existing `db/migrations/*.sql` files.
+6. **No auth unless requested**: Do not add authentication unless explicitly requested.
+7. **No destructive migrations**: Do not drop tables or delete data irreversibly.
+8. **No hardcoded secrets**: Never commit API keys or credentials.
+9. **Show diff after changes**: Always show git diff after making changes.
+10. **Run relevant tests**: Backend: `go test ./...`, Frontend: `npm run test:run`, `npm run lint`, `npm run build`.
 
-Create:
-- health endpoint
-- task create/list/detail
-- task status update
-- task events
-- task artifacts
+## Completed Phases (Historical)
 
-Required endpoints:
-- GET /health
-- POST /tasks
-- GET /tasks
-- GET /tasks/:id
-- PATCH /tasks/:id/status
-- POST /tasks/:id/events
-- GET /tasks/:id/events
-- POST /tasks/:id/artifacts
-- GET /tasks/:id/artifacts
+### Phase A: Solid Task Control Plane
 
-### Phase 3: Next.js dashboard
+Database and API for tasks, events, artifacts.
+- Tasks CRUD
+- Task events
+- Task artifacts
 
-Create:
-- task list page
-- create task form
-- task detail page
-- event timeline
-- artifact viewer
+### Phase A.1: Cleanup/Fixes
 
-Required pages:
-- /tasks
-- /tasks/new
-- /tasks/[id]
+Bug fixes and validation improvements.
 
-Required UI:
-- task list
-- create task form
-- task detail
-- status display
-- events timeline
-- artifacts viewer
+### Phase B.1: Agent Orchestration Database/Backend API Skeleton
 
-### Phase 4: Manual opencode workflow
+Database schema and backend API skeleton for agent orchestration:
+- Agent profiles API
+- Agent teams + members API
+- Agent runs API
+- Run steps API
+- Messages API
+- Approvals API
+- Tool calls API
 
-Do not automate opencode yet.
+**Tables added**: `agent_profiles`, `agent_teams`, `agent_team_members`, `agent_runs`, `agent_run_steps`, `agent_messages`, `agent_tool_calls`, `human_approvals`
+
+### Phase B.1.1: Validation and Backend Test Coverage
+
+Backend handler tests, repository tests.
+
+### Phase B.2.1: Frontend Agent Profiles/Teams
+
+Frontend pages:
+- `/agents` - Agent profiles list
+- `/agents/profiles/new` - Create profile
+- `/agents/teams/new` - Create team
+- `/agents/teams/[id]` - Team detail
+
+### Phase B.2.1.1: Team Member Position Field
+
+Fixed team member position field handling.
+
+### Phase B.2.2: Task Agent Runs + Run Steps UI
+
+Frontend:
+- `/agent-runs/[id]` - Run detail page
+- Run steps list
+- Add step form
+- Step status selector
+
+### Phase B.2.3: Messages, Approvals, Tool Calls UI
+
+Frontend panels in run detail:
+- Agent messages panel (list + add form)
+- Human approvals panel (list + status selector)
+- Tool calls panel (list + status selector)
+- 2-column grid layout
+
+### Phase B.2.3.1: Frontend API Tests and Import Cleanup
+
+- Added 8 new API tests for messages, approvals, tool calls
+- Cleaned up unused imports in AgentRuns components
+- Frontend: 52 tests passing, lint passing, build passing
+
+## Next Phase
+
+### Phase C: Auto Orchestration MVP
+
+**DO NOT IMPLEMENT YET unless explicitly requested.**
+
+Goal: Enable automatic execution of agent runs.
+
+See `docs/PHASE_C_PLAN.md` for full plan.
+
+**Phases in C**:
+- **C.1**: Orchestrator Core - state transitions, step creation from team
+- **C.2**: LLM Provider Interface - abstraction for LLMs
+- **C.3**: Execution Loop - step execution, tool stubs
+- **C.4**: Dashboard Controls - start/cancel UI, polling
+- **C.5**: Guardrails and Tests - safety, test coverage
+
+**Required new endpoints**:
+- `POST /agent-runs/:id/start`
+- `POST /agent-runs/:id/cancel`
+
+## Phase 4: Manual Workflow (Legacy/Fallback)
+
+This was the original manual approach, kept as historical context:
 
 User will:
 1. Create task in dashboard
@@ -110,3 +160,12 @@ User will:
 5. Ask opencode to implement one phase
 6. Review diff
 7. Commit changes
+
+## Project Docs
+
+For full documentation, see:
+- `docs/PROJECT_BRIEF.md` - Product vision, goals, non-goals
+- `docs/CURRENT_STATUS.md` - What exists, what doesn't, API reference
+- `docs/PHASE_C_PLAN.md` - Detailed plan for auto orchestration
+- `docs/AGENT_TEAM.md` - Agent definitions, ownership, coordination
+- `docs/WORK_LOG.md` - History, current status, next steps

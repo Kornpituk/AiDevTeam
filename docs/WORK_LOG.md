@@ -1,0 +1,235 @@
+# Work Log
+
+## Historical Log: Completed Phases
+
+### Phase A: Solid Task Control Plane
+
+**Status**: ✅ Complete
+
+**Goal**: Build a control plane for AI-assisted software development.
+
+**Delivered**:
+- Tasks CRUD API
+- Task events API
+- Task artifacts API
+- Frontend: /tasks, /tasks/new, /tasks/[id]
+- Database: `ai_tasks`, `ai_task_events`, `ai_task_artifacts`
+
+**Migrations**:
+- `db/migrations/000001_init.sql`
+
+---
+
+### Phase A.1: Cleanup/Fixes
+
+**Status**: ✅ Complete
+
+**Delivered**:
+- Bug fixes and validation
+- Test coverage improvements
+
+---
+
+### Phase B.1: Agent Orchestration Database/Backend API Skeleton
+
+**Status**: ✅ Complete
+
+**Goal**: Database and backend API skeleton for agent orchestration.
+
+**Delivered**:
+- Agent profiles API (CRUD)
+- Agent teams API (CRUD + members)
+- Agent runs API (create, list, get)
+- Run steps API (create, list, update status)
+- Messages API
+- Approvals API
+- Tool calls API
+
+**Database Tables Added**:
+- `agent_profiles`
+- `agent_teams`
+- `agent_team_members`
+- `agent_runs`
+- `agent_run_steps`
+- `agent_messages`
+- `agent_tool_calls`
+- `human_approvals`
+
+**Migrations**:
+- `db/migrations/000002_agent_orchestration.sql`
+
+---
+
+### Phase B.1.1: Validation and Backend Test Coverage
+
+**Status**: ✅ Complete
+
+**Delivered**:
+- Backend handler tests
+- Repository tests
+- All tests passing
+
+---
+
+### Phase B.2.1: Frontend Agent Profiles/Teams
+
+**Status**: ✅ Complete
+
+**Delivered**:
+- Agent profiles page (`/agents`)
+- Create profile page (`/agents/profiles/new`)
+- Agent teams page
+- Create team page (`/agents/teams/new`)
+- Team detail page (`/agents/teams/[id]`)
+
+---
+
+### Phase B.2.1.1: Team Member Position Field
+
+**Status**: ✅ Complete
+
+**Delivered**:
+- Fixed team member position field handling
+- Position field properly used for ordering
+
+---
+
+### Phase B.2.2: Task Agent Runs + Run Steps UI
+
+**Status**: ✅ Complete
+
+**Delivered**:
+- Agent run detail page (`/agent-runs/[id]`)
+- Run steps list
+- Add step form
+- Step status selector
+- Status badges
+
+---
+
+### Phase B.2.3: Messages, Approvals, Tool Calls UI
+
+**Status**: ✅ Complete
+
+**Delivered**:
+- Agent Messages Panel (list + add form)
+- Human Approvals Panel (list + status selector)
+- Tool Calls Panel (list + status selector)
+- Add message form
+- Add approval form
+- Add tool call form
+- 2-column grid layout in run detail
+
+---
+
+### Phase B.2.3.1: Frontend API Tests and Import Cleanup
+
+**Status**: ✅ Complete
+
+**Delivered**:
+- Added 8 new API tests for messages, approvals, tool calls
+- Frontend tests: 52 passing (was 44)
+- MSW mock handlers for all new endpoints
+- Cleaned up unused imports in 5 AgentRuns components
+
+---
+
+## Current Status
+
+### Next Step: Phase C
+
+**Phase C**: Auto Orchestration MVP
+
+**Goal**: Enable automatic execution of agent runs through an orchestration engine.
+
+**Phases in Phase C**:
+- **C.1**: Orchestrator Core - state transitions, step creation from team
+- **C.2**: LLM Provider Interface - abstraction for calling LLMs
+- **C.3**: Execution Loop - step execution, tool stubs
+- **C.4**: Dashboard Controls - start/cancel UI, polling
+- **C.5**: Guardrails and Tests - safety, test coverage
+
+See `docs/PHASE_C_PLAN.md` for full details.
+
+---
+
+## Open Risks
+
+1. **AGENTS.md previously blocked AI automation**
+   - OLD: "Do not add AI automation yet."
+   - FIXED: Updated to allow AI automation in Phase C with proper constraints
+   - New rule: "AI automation is allowed only in Phase C work, must be scoped, configurable, tested, and must not hardcode secrets."
+
+2. **No shared memory files existed**
+   - FIXED: Created docs files for project memory:
+     - `docs/PROJECT_BRIEF.md`
+     - `docs/CURRENT_STATUS.md`
+     - `docs/PHASE_C_PLAN.md`
+     - `docs/AGENT_TEAM.md`
+     - `docs/WORK_LOG.md`
+   - Created `.opencode/agents/*.md` for OpenCode agent team
+
+3. **Multi-agent work needs strict ownership**
+   - FIXED: `docs/AGENT_TEAM.md` defines clear ownership boundaries
+   - @leader coordinates
+   - Each agent stays within their scope
+
+4. **Phase C should avoid scope creep**
+   - Mitigation: `docs/PHASE_C_PLAN.md` clearly defines:
+     - What's in scope
+     - What's out of scope
+     - Acceptance criteria
+     - Implementation order
+
+---
+
+## Latest Verification (After Phase B.2.3.1)
+
+### Backend
+- `go test ./...` → All passing (cached)
+
+### Frontend
+- `npm run test:run` → 52 tests passing
+- `npm run lint` → No warnings/errors
+- `npm run build` → Success
+
+### Database
+- 2 migrations applied:
+  - `000001_init.sql`
+  - `000002_agent_orchestration.sql`
+
+### Key Endpoints Available
+See `docs/CURRENT_STATUS.md` for full list.
+
+---
+
+## Quick Reference
+
+| Document | Purpose |
+|----------|---------|
+| `docs/PROJECT_BRIEF.md` | Product vision, goals, non-goals, success criteria |
+| `docs/CURRENT_STATUS.md` | What exists, what doesn't, API reference |
+| `docs/PHASE_C_PLAN.md` | Detailed plan for auto orchestration |
+| `docs/AGENT_TEAM.md` | Agent definitions, ownership, coordination |
+| `docs/WORK_LOG.md` | This file - history and current status |
+| `AGENTS.md` | Project-level rules and phase definition |
+| `opencode.json` | OpenCode configuration |
+| `.opencode/agents/*.md` | OpenCode agent team definitions |
+
+---
+
+## Git Commands Reference
+
+```bash
+# Check status
+git status
+
+# View diff
+git diff
+
+# Add all changes
+git add .
+
+# Commit
+git commit -m "message"
+```
