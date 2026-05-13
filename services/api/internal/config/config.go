@@ -10,6 +10,15 @@ type Config struct {
 	Port     string
 	Database DatabaseConfig
 	LLM      LLMConfig
+	Tool     ToolConfig
+}
+
+type ToolConfig struct {
+	WorkspaceRoot     string
+	ReadMaxBytes      int64
+	SearchMaxResults  int
+	MaxToolIterations int
+	RequireApproval   string
 }
 
 type DatabaseConfig struct {
@@ -53,7 +62,23 @@ func Load() *Config {
 			BaseURL:  getEnv("LLM_BASE_URL", ""),
 			Timeout:  getEnvDuration("LLM_TIMEOUT", 60*time.Second),
 		},
+		Tool: ToolConfig{
+			WorkspaceRoot:     getEnv("WORKSPACE_ROOT", ""),
+			ReadMaxBytes:      getEnvInt64("TOOL_READ_MAX_BYTES", 1048576),
+			SearchMaxResults:  getEnvInt("TOOL_SEARCH_MAX_RESULTS", 50),
+			MaxToolIterations: getEnvInt("TOOL_MAX_ITERATIONS", 10),
+			RequireApproval:   getEnv("TOOL_REQUIRE_APPROVAL", ""),
+		},
 	}
+}
+
+func getEnvInt64(key string, defaultValue int64) int64 {
+	if value := os.Getenv(key); value != "" {
+		if intValue, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return intValue
+		}
+	}
+	return defaultValue
 }
 
 func getEnv(key, defaultValue string) string {

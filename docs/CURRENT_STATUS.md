@@ -1,6 +1,6 @@
 # Current Status
 
-## What Exists Now (as of Phase C.1.3)
+## What Exists Now (as of Phase C.2.2)
 
 ### Backend Stack
 
@@ -9,6 +9,7 @@
 - **Database**: Postgres via database/sql + lib/pq
 - **Pattern**: Handler → Repository → Model
 - **Configuration**: JSON config + environment variables
+- **Tool Config**: `WORKSPACE_ROOT`, `TOOL_READ_MAX_BYTES` (default 1MB), `TOOL_SEARCH_MAX_RESULTS` (default 50), `TOOL_MAX_ITERATIONS` (default 10)
 
 ### Frontend Stack
 
@@ -167,12 +168,66 @@ components/
 - **Refresh Button**: Manual Refresh button in Agent Messages panel
 - **API functions**: `startAgentRun()`, `cancelAgentRun()`
 
+#### Read-Only Tool Execution (Phase C.2.1 - `services/api/internal/tool/`)
+
+**New tool package** with 3 read-only tools:
+
+| Tool | Input | Output | Safety |
+|------|-------|--------|--------|
+| `list_files` | `{path, depth}` | File/dir listing | Blocked: `.git`, `node_modules`, `.env`, etc. Depth-controlled |
+| `read_file` | `{path}` | Text content (truncated) | Binary detection, extension check, max bytes limit |
+| `search_code` | `{pattern, path?, is_regex?}` | Matching lines + snippets | Regex support, max results limit, skips blocked paths |
+
+**Path safety rules**:
+- Rejects absolute paths and `../` traversal
+- Validates path stays within `WORKSPACE_ROOT`
+- Blocks: `.env`, `.env.*`, `.git`, `node_modules`, `.next`, `dist`, `build`, `vendor`
+- Binary detection by extension + null byte check
+- Symlink escape detection via `filepath.EvalSymlinks`
+
+**Multi-Turn Tool Feedback Loop (Phase C.2.2)**:
+- LLM can now iterate: response → tool_calls → execute → feed results back → re-query LLM → repeat
+- Loop terminates when LLM response has no `tool_calls` (final answer) or `MaxToolIterations` is reached
+- All tool results are stored as `agent_messages` with `role: "tool"` AND appended to LLM conversation context
+- Step output = final non-tool-call LLM response (or fallback `"Step completed."` if max iterations reached)
+- Configurable via `TOOL_MAX_ITERATIONS` env var (default: 10)
+
+**Integration**:
+- LLM can trigger tools via JSON format: `{"tool_calls":[{"tool_name":"read_file","input":{"path":"..."}}]}`
+- Tool calls recorded in `agent_tool_calls` table (status: `completed`/`failed`)
+- Tool results stored as `agent_messages` with `role: "tool"` AND fed back into LLM context
+- Multi-turn loop: each LLM call includes full conversation history (system + user + assistant + tool messages)
+- Tool errors do not crash the server
+
+**Tool Approval Gates (Phase C.2.3)**:
+- Configurable via `TOOL_REQUIRE_APPROVAL` env var (comma-separated list of tool names, e.g., `read_file,search_code`)
+- Before executing each tool call, the orchestrator checks if the tool requires approval
+- If approval required:
+  - Creates `human_approval` record with `status: pending`, `approval_type: "tool:<name>"`
+  - Creates `agent_tool_call` with `status: "recorded"` (not executed)
+  - Feeds back to LLM: "Tool requires human approval. Approval ID: ..."
+  - Does NOT fail the step/run — LLM continues without the tool result
+- If no approval required: tool executes normally (existing behavior)
+- Frontend approvals panel polls every 3s during running state to show auto-created approvals
+
+**New config env vars**:
+- `WORKSPACE_ROOT` - Project root (defaults to current working directory)
+- `TOOL_READ_MAX_BYTES` - Max bytes to read per file (default: 1048576)
+- `TOOL_SEARCH_MAX_RESULTS` - Max search results (default: 50)
+- `TOOL_MAX_ITERATIONS` - Max tool call iterations per step (default: 10)
+- `TOOL_REQUIRE_APPROVAL` - Comma-separated tool names requiring approval before execution (default: empty)
+
 ### Latest Verification Status
 
-Last verified after Phase C.1.3:
+Last verified after Phase C.2.3:
 
 - **Backend tests**: `go test ./...` → All passing
-- **Backend test count**: ~43 orchestrator tests (role mapping, status validation, pending-only execution, existing-failed fail-fast, cancellation handling, atomic transitions, multi-run concurrency, task context integration)
+- **Backend test count**: 394 test cases passing (+3 tool approval gate tests)
+  - Safety/path validation: 12 tests
+  - `read_file`: 8 tests
+  - `list_files`: 5 tests
+  - `search_code`: 5 tests
+  - Orchestrator tool integration: 13 tests (10 multi-turn + 3 approval gate)
 - **Frontend tests**: `npm run test:run` → 54 tests passing
 - **Frontend lint**: `npm run lint` → No ESLint warnings or errors
 - **Frontend build**: `npm run build` → Success (9 static pages generated)
@@ -187,6 +242,12 @@ Last verified after Phase C.1.3:
 - `POST /agent-runs/:id/pause` - Pause execution
 - `POST /agent-runs/:id/resume` - Resume execution
 
+### Phase C.2.x (Not Yet Implemented)
+
+- **Write tool execution** (`write_file`, `edit_file`, `bash`, `git`) — explicitly out of scope for Phase C.2.x
+- **Native LLM function calling** — currently parsing JSON from text response; `tool_choice` / function calling not yet wired
+- **Automatic tool execution after approval** — approved tools are not automatically executed; user must re-run if needed
+
 ### Limitations (By Design for MVP)
 
 #### No WebSocket Real-time Updates
@@ -198,13 +259,10 @@ Last verified after Phase C.1.3:
 - No Redis, RabbitMQ, or external job queue
 - Runs don't survive process restart
 
-#### No Real Dangerous Tool Execution
-- Tool calls are database records only
-- No actual execution of:
-  - File write (read may be added later)
-  - Bash commands
-  - Git operations that modify state
-  - Web requests that modify external systems
+#### No Write/Bash/Git Tool Execution
+- Only read-only tools available: `list_files`, `read_file`, `search_code`
+- No actual modification of files, bash commands, or git operations
+- Multi-turn tool feedback loop allows iterative inspection but not modification
 
 #### No Automatic Codebase Modification by AI
 - All AI execution must be explicitly planned, scoped, and approved

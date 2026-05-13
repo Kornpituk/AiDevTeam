@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/llm"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
+	"github.com/Kornpituk/AiDevTeam/services/api/internal/tool"
 )
 
 const (
@@ -196,6 +198,18 @@ func (m *mockOrchestratorRepo) GetTaskByID(id string) (*model.Task, error) {
 	return m.task, nil
 }
 
+func (m *mockOrchestratorRepo) CreateToolCall(toolCall *model.AgentToolCall) error {
+	return nil
+}
+
+func (m *mockOrchestratorRepo) UpdateToolCallStatus(id string, status string) (*model.AgentToolCall, error) {
+	return &model.AgentToolCall{ID: id, Status: status}, nil
+}
+
+func (m *mockOrchestratorRepo) CreateApproval(approval *model.HumanApproval) error {
+	return nil
+}
+
 type blockingFakeLLM struct {
 	llm.LLMProvider
 	blockChan chan struct{}
@@ -264,7 +278,7 @@ func TestStartRun_ValidatesStartableStatuses(t *testing.T) {
 			}
 
 			fakeLLM := llm.NewFakeProvider()
-			orch := NewOrchestrator(repo, fakeLLM)
+			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 			err := orch.StartRun(context.Background(), testRunID)
 			if err != nil {
@@ -282,7 +296,7 @@ func TestStartRun_ValidatesStartableStatuses(t *testing.T) {
 			}
 
 			fakeLLM := llm.NewFakeProvider()
-			orch := NewOrchestrator(repo, fakeLLM)
+			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 			err := orch.StartRun(context.Background(), testRunID)
 			if err == nil {
@@ -331,7 +345,7 @@ func TestStartRun_CreatesStepsFromTeam(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	err := orch.StartRun(context.Background(), testRunID)
 	if err != nil {
@@ -380,7 +394,7 @@ func TestStartRun_DoesNotCreateDuplicateSteps(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	err := orch.StartRun(context.Background(), testRunID)
 	if err != nil {
@@ -401,7 +415,7 @@ func TestExecuteRun_NoStepsCompletesImmediately(t *testing.T) {
 	repo.steps = []model.AgentRunStep{}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -433,7 +447,7 @@ func TestExecuteRun_CancelledBeforeExecution(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -468,7 +482,7 @@ func TestExecuteRun_CancelledDuringStep(t *testing.T) {
 	}
 
 	blockingLLM := newBlockingFakeLLM()
-	orch := NewOrchestrator(repo, blockingLLM)
+	orch := NewOrchestrator(repo, blockingLLM, tool.ToolOptions{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -505,7 +519,7 @@ func TestCancelRun_TerminalStatesRejected(t *testing.T) {
 			}
 
 			fakeLLM := llm.NewFakeProvider()
-			orch := NewOrchestrator(repo, fakeLLM)
+			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 			err := orch.CancelRun(testRunID)
 			if err == nil {
@@ -527,7 +541,7 @@ func TestCancelRun_NonTerminalCallsCancelAndUpdatesStatus(t *testing.T) {
 			}
 
 			fakeLLM := llm.NewFakeProvider()
-			orch := NewOrchestrator(repo, fakeLLM)
+			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 			ctx, cancel := context.WithCancel(context.Background())
 			orch.mu.Lock()
@@ -575,7 +589,7 @@ func TestStartRun_NoStepsCreatedOnFailedTransition(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	err := orch.StartRun(context.Background(), testRunID)
 	if err == nil {
@@ -621,7 +635,7 @@ func TestStartRun_CleansUpOnFailedStepCreation(t *testing.T) {
 	repo.createStepErr = errors.New("db error")
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	err := orch.StartRun(context.Background(), testRunID)
 	if err == nil {
@@ -687,7 +701,7 @@ func TestStartRun_SimulatedConcurrentStart(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	err1 := orch.StartRun(context.Background(), testRunID)
 	if err1 != nil {
@@ -723,7 +737,7 @@ func TestStartRun_HappyPathNoTeam(t *testing.T) {
 	repo.steps = []model.AgentRunStep{}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	err := orch.StartRun(context.Background(), testRunID)
 	if err != nil {
@@ -749,7 +763,7 @@ func TestStartRun_HappyPathNoTeam(t *testing.T) {
 func TestNewOrchestrator_InitializesRunningMap(t *testing.T) {
 	repo := newMockOrchestratorRepo()
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	if orch.running == nil {
 		t.Error("running map should be initialized")
@@ -777,8 +791,8 @@ func TestMultipleRuns_CanRunConcurrently(t *testing.T) {
 
 	fakeLLM := llm.NewFakeProvider()
 	
-	orch1 := NewOrchestrator(repo1, fakeLLM)
-	orch2 := NewOrchestrator(repo2, fakeLLM)
+	orch1 := NewOrchestrator(repo1, fakeLLM, tool.ToolOptions{})
+	orch2 := NewOrchestrator(repo2, fakeLLM, tool.ToolOptions{})
 
 	err1 := orch1.StartRun(context.Background(), testRunID)
 	err2 := orch2.StartRun(context.Background(), testRunID2)
@@ -820,7 +834,7 @@ func TestExecuteRun_CompletedStepsNotRerun(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -864,7 +878,7 @@ func TestExecuteRun_SkippedStepsNotRerun(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -911,7 +925,7 @@ func TestExecuteRun_ExistingFailedStepFailsRun(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -959,7 +973,7 @@ func TestExecuteRun_NoPendingStepsCompletes(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -994,7 +1008,7 @@ func TestExecuteRun_CancelledDuringLLM_MarksCancelled(t *testing.T) {
 	}
 
 	blockingLLM := newBlockingFakeLLM()
-	orch := NewOrchestrator(repo, blockingLLM)
+	orch := NewOrchestrator(repo, blockingLLM, tool.ToolOptions{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -1029,7 +1043,7 @@ func TestStartRun_AtomicStatusTransition(t *testing.T) {
 		}
 
 		fakeLLM := llm.NewFakeProvider()
-		orch := NewOrchestrator(repo, fakeLLM)
+		orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 		err := orch.StartRun(context.Background(), testRunID)
 		if err == nil {
@@ -1053,7 +1067,7 @@ func TestStartRun_AtomicStatusTransition(t *testing.T) {
 		repo.steps = []model.AgentRunStep{}
 
 		fakeLLM := llm.NewFakeProvider()
-		orch := NewOrchestrator(repo, fakeLLM)
+		orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 		err := orch.StartRun(context.Background(), testRunID)
 		if err != nil {
@@ -1114,7 +1128,7 @@ func TestExecuteRun_IncludesTaskContextInMessages(t *testing.T) {
 	}
 
 	capLLM := &capturingLLM{}
-	orch := NewOrchestrator(repo, capLLM)
+	orch := NewOrchestrator(repo, capLLM, tool.ToolOptions{})
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -1166,7 +1180,7 @@ func TestExecuteRun_TaskLoadFailureFailsRun(t *testing.T) {
 	repo.getTaskErr = errors.New("db error")
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM)
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -1203,7 +1217,7 @@ func TestExecuteRun_EmptyTaskIDSkipsTaskContext(t *testing.T) {
 	}
 
 	capLLM := &capturingLLM{}
-	orch := NewOrchestrator(repo, capLLM)
+	orch := NewOrchestrator(repo, capLLM, tool.ToolOptions{})
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -1225,5 +1239,506 @@ func TestExecuteRun_EmptyTaskIDSkipsTaskContext(t *testing.T) {
 	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
 	if lastStatus != "completed" {
 		t.Errorf("Expected run to complete successfully, got status: %q", lastStatus)
+	}
+}
+
+// captureMockRepo records created tool calls and messages for verification
+type captureMockRepo struct {
+	*mockOrchestratorRepo
+	createdToolCalls []*model.AgentToolCall
+	createdMessages  []*model.AgentMessage
+}
+
+func newCaptureMockRepo() *captureMockRepo {
+	return &captureMockRepo{
+		mockOrchestratorRepo: newMockOrchestratorRepo(),
+	}
+}
+
+func (m *captureMockRepo) CreateToolCall(toolCall *model.AgentToolCall) error {
+	m.createdToolCalls = append(m.createdToolCalls, toolCall)
+	return nil
+}
+
+func (m *captureMockRepo) CreateMessage(message *model.AgentMessage) error {
+	m.createdMessages = append(m.createdMessages, message)
+	return nil
+}
+
+func (m *captureMockRepo) CreateApproval(approval *model.HumanApproval) error {
+	// just return success, we can check via createdToolCalls
+	return nil
+}
+
+// toolResponseLLM returns responses in sequence across multiple calls.
+// First call returns the first response, second call returns the second, etc.
+type toolResponseLLM struct {
+	llm.LLMProvider
+	responses []string
+	callCount int
+}
+
+func newToolResponseLLM(responses ...string) *toolResponseLLM {
+	return &toolResponseLLM{responses: responses}
+}
+
+func (t *toolResponseLLM) ChatCompletion(ctx context.Context, messages []llm.Message) (string, error) {
+	if t.callCount >= len(t.responses) {
+		return "No more responses configured.", nil
+	}
+	resp := t.responses[t.callCount]
+	t.callCount++
+	return resp, nil
+}
+
+func TestExecuteRun_ToolCallsCreateAgentToolCallRecords(t *testing.T) {
+	repo := newCaptureMockRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+
+	// LLM returns tool calls first, then a normal response to terminate the loop
+	toolLLM := newToolResponseLLM(
+		`{"tool_calls":[{"tool_name":"list_files","input":{"path":"."}}]}`,
+		`Listed files successfully. Here is the directory structure.`,
+	)
+
+	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{RequireApproval: []string{}})
+	orch.executeRun(context.Background(), testRunID)
+
+	// Verify tool call was created
+	if len(repo.createdToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call created, got %d", len(repo.createdToolCalls))
+	}
+
+	tc := repo.createdToolCalls[0]
+	if tc.ToolName != "list_files" {
+		t.Errorf("expected tool_name 'list_files', got %q", tc.ToolName)
+	}
+	if tc.RunID != testRunID {
+		t.Errorf("expected run_id %q, got %q", testRunID, tc.RunID)
+	}
+	if tc.Status != "completed" {
+		t.Errorf("expected tool call status 'completed', got %q", tc.Status)
+	}
+}
+
+func TestExecuteRun_ToolResultCreatesToolMessage(t *testing.T) {
+	repo := newCaptureMockRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+
+	toolLLM := newToolResponseLLM(
+		`{"tool_calls":[{"tool_name":"list_files","input":{"path":"."}}]}`,
+		`Directory listed. Analysis complete.`,
+	)
+
+	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{})
+	orch.executeRun(context.Background(), testRunID)
+
+	// Verify tool message was created (should have role "tool")
+	toolMessages := 0
+	for _, msg := range repo.createdMessages {
+		if msg.Role == "tool" {
+			toolMessages++
+		}
+	}
+	if toolMessages != 1 {
+		t.Errorf("expected 1 tool message, got %d. All messages: %+v", toolMessages, repo.createdMessages)
+	}
+}
+
+func TestExecuteRun_FailedToolCallDoesNotCrash(t *testing.T) {
+	repo := newCaptureMockRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+
+	// Unknown tool should fail gracefully; then return normal text to terminate loop
+	toolLLM := newToolResponseLLM(
+		`{"tool_calls":[{"tool_name":"unknown_tool","input":{"path":"."}}]}`,
+		`Completed processing with some tool errors.`,
+	)
+
+	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{})
+	orch.executeRun(context.Background(), testRunID)
+
+	// Verify tool call was created with failed status
+	if len(repo.createdToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call created, got %d", len(repo.createdToolCalls))
+	}
+	if repo.createdToolCalls[0].Status != "failed" {
+		t.Errorf("expected failed tool call status, got %q", repo.createdToolCalls[0].Status)
+	}
+
+	// Run should still complete (tool error != run failure)
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "completed" {
+		t.Errorf("expected run to complete despite tool error, last status: %q", lastStatus)
+	}
+}
+
+// messagesRecorderLLM records all messages passed to ChatCompletion for verification.
+type messagesRecorderLLM struct {
+	responses  []string
+	callCount  int
+	allCalls   [][]llm.Message
+}
+
+func newMessagesRecorderLLM(responses ...string) *messagesRecorderLLM {
+	return &messagesRecorderLLM{responses: responses}
+}
+
+func (m *messagesRecorderLLM) ChatCompletion(ctx context.Context, messages []llm.Message) (string, error) {
+	// Record a copy of the messages
+	msgsCopy := make([]llm.Message, len(messages))
+	copy(msgsCopy, messages)
+	m.allCalls = append(m.allCalls, msgsCopy)
+
+	if m.callCount >= len(m.responses) {
+		return "No more responses configured.", nil
+	}
+	resp := m.responses[m.callCount]
+	m.callCount++
+	return resp, nil
+}
+
+func TestExecuteRun_MultiTurnFeedsToolResultsToLLM(t *testing.T) {
+	repo := newCaptureMockRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+
+	// First call returns a tool call; second call returns a normal response.
+	llm := newMessagesRecorderLLM(
+		`{"tool_calls":[{"tool_name":"list_files","input":{"path":"."}}]}`,
+		`Based on the directory listing, the project has 3 main directories.`,
+	)
+
+	orch := NewOrchestrator(repo, llm, tool.ToolOptions{})
+	orch.executeRun(context.Background(), testRunID)
+
+	// Verify run completed
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "completed" {
+		t.Fatalf("expected run to complete, last status: %q", lastStatus)
+	}
+
+	// Verify step output is the final non-tool-call response
+	if len(repo.steps) > 0 && repo.steps[0].Status == "completed" {
+		if !strings.Contains(repo.steps[0].Output, "3 main directories") {
+			t.Errorf("step output should contain final LLM response, got: %q", repo.steps[0].Output)
+		}
+	}
+
+	// Verify LLM was called twice (tool round + final)
+	if len(llm.allCalls) != 2 {
+		t.Fatalf("expected 2 LLM calls, got %d", len(llm.allCalls))
+	}
+
+	// First call: system + user (initial messages, no tool results yet)
+	firstCall := llm.allCalls[0]
+	if len(firstCall) < 2 {
+		t.Fatalf("first LLM call: expected at least 2 messages (system+user), got %d", len(firstCall))
+	}
+	if firstCall[0].Role != "system" {
+		t.Errorf("first message role should be 'system', got %q", firstCall[0].Role)
+	}
+	if firstCall[1].Role != "user" {
+		t.Errorf("second message role should be 'user', got %q", firstCall[1].Role)
+	}
+
+	// Second call: system + user + assistant (tool call JSON) + tool (tool result)
+	secondCall := llm.allCalls[1]
+	if len(secondCall) < 4 {
+		t.Fatalf("second LLM call: expected at least 4 messages (system+user+assistant+tool), got %d", len(secondCall))
+	}
+
+	// Verify the assistant message from the first iteration is in context
+	if secondCall[2].Role != "assistant" {
+		t.Errorf("third message role should be 'assistant', got %q", secondCall[2].Role)
+	}
+	if !strings.Contains(secondCall[2].Content, "list_files") {
+		t.Errorf("assistant message should contain tool call JSON, got: %q", secondCall[2].Content)
+	}
+
+	// Verify the tool result from the first iteration is in context
+	if secondCall[3].Role != "tool" {
+		t.Errorf("fourth message role should be 'tool', got %q", secondCall[3].Role)
+	}
+	if !strings.Contains(secondCall[3].Content, "list_files") {
+		t.Errorf("tool message should contain tool result with 'list_files', got: %q", secondCall[3].Content)
+	}
+	if !strings.Contains(secondCall[3].Content, "success") {
+		t.Errorf("tool message should contain success indicator, got: %q", secondCall[3].Content)
+	}
+}
+
+func TestExecuteRun_ToolWithApprovalCreatesApprovalRecord(t *testing.T) {
+	repo := newCaptureMockRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+
+	toolLLM := newToolResponseLLM(
+		`{"tool_calls":[{"tool_name":"read_file","input":{"path":"test.txt"}}]}`,
+		`File analysis complete.`,
+	)
+
+	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{
+		RequireApproval: []string{"read_file"},
+	})
+	orch.executeRun(context.Background(), testRunID)
+
+	// Tool call should be "recorded" not "completed"
+	if len(repo.createdToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(repo.createdToolCalls))
+	}
+	if repo.createdToolCalls[0].Status != "recorded" {
+		t.Errorf("expected status 'recorded', got %q", repo.createdToolCalls[0].Status)
+	}
+
+	// Tool message should mention approval
+	foundApprovalMsg := false
+	for _, msg := range repo.createdMessages {
+		if msg.Role == "tool" && strings.Contains(msg.Content, "requires human approval") {
+			foundApprovalMsg = true
+			break
+		}
+	}
+	if !foundApprovalMsg {
+		t.Error("expected tool message mentioning 'requires human approval'")
+	}
+
+	// Run should complete
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "completed" {
+		t.Errorf("expected run to complete, got %q", lastStatus)
+	}
+}
+
+func TestExecuteRun_ToolWithoutApprovalExecutesNormally(t *testing.T) {
+	repo := newCaptureMockRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+
+	// Use list_files which succeeds even without explicit workspace root
+	toolLLM := newToolResponseLLM(
+		`{"tool_calls":[{"tool_name":"list_files","input":{"path":"."}}]}`,
+		`Directory listing complete.`,
+	)
+
+	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{
+		RequireApproval: []string{},
+	})
+	orch.executeRun(context.Background(), testRunID)
+
+	// Tool call should be "completed" not "recorded"
+	if len(repo.createdToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(repo.createdToolCalls))
+	}
+	if repo.createdToolCalls[0].Status != "completed" {
+		t.Errorf("expected status 'completed', got %q", repo.createdToolCalls[0].Status)
+	}
+
+	// Tool message should NOT mention approval
+	for _, msg := range repo.createdMessages {
+		if msg.Role == "tool" && strings.Contains(msg.Content, "requires human approval") {
+			t.Error("tool message should NOT mention 'requires human approval' when no approval gate")
+			break
+		}
+	}
+
+	// Run should complete
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "completed" {
+		t.Errorf("expected run to complete, got %q", lastStatus)
+	}
+}
+
+func TestExecuteRun_ToolWithApprovalDoesNotFailRun(t *testing.T) {
+	repo := newCaptureMockRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+
+	toolLLM := newToolResponseLLM(
+		`{"tool_calls":[{"tool_name":"read_file","input":{"path":"test.txt"}}]}`,
+		`File analysis complete.`,
+	)
+
+	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{
+		RequireApproval: []string{"read_file"},
+	})
+	orch.executeRun(context.Background(), testRunID)
+
+	// Run should still complete (approval gate != run failure)
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "completed" {
+		t.Errorf("expected run to complete despite approval gate, got %q", lastStatus)
+	}
+}
+
+func TestToolRegistry_NoWriteToolsExist(t *testing.T) {
+	writeToolNames := []string{"write_file", "edit_file", "bash", "git", "apply_patch", "delete_file", "rename_file", "create_file", "mkdir", "exec_command"}
+
+	for _, name := range writeToolNames {
+		_, err := tool.GetTool(name)
+		if err == nil {
+			t.Errorf("write tool %q should NOT be registered", name)
+		}
+	}
+}
+
+func TestToolRegistry_ReadOnlyToolsExist(t *testing.T) {
+	readTools := []string{"read_file", "list_files", "search_code"}
+
+	for _, name := range readTools {
+		tool, err := tool.GetTool(name)
+		if err != nil {
+			t.Errorf("read-only tool %q should be registered, got error: %v", name, err)
+		}
+		if tool == nil {
+			t.Errorf("tool %q should not be nil", name)
+		}
+	}
+}
+
+func TestParseToolCalls_ExtractsFromJSON(t *testing.T) {
+	text := `{"tool_calls":[{"tool_name":"read_file","input":{"path":"test.txt"}}]}`
+	calls, err := tool.ParseToolCalls(text)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+	if calls[0].ToolName != "read_file" {
+		t.Errorf("expected tool_name 'read_file', got %q", calls[0].ToolName)
+	}
+}
+
+func TestParseToolCalls_ExtractsFromTextBlock(t *testing.T) {
+	text := `Here are the files I found:
+{"tool_calls":[{"tool_name":"list_files","input":{"path":"src"}}]}
+Now let me examine the main file.`
+	calls, err := tool.ParseToolCalls(text)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+	if calls[0].ToolName != "list_files" {
+		t.Errorf("expected tool_name 'list_files', got %q", calls[0].ToolName)
+	}
+}
+
+func TestParseToolCalls_ReturnsNilForNoCalls(t *testing.T) {
+	text := `This is just a normal response without tool calls.`
+	calls, err := tool.ParseToolCalls(text)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != nil {
+		t.Errorf("expected nil tool calls, got %+v", calls)
+	}
+}
+
+func TestToolCallJSON_IncludesToolResponse(t *testing.T) {
+	// Verify that the tool output JSON contains the expected fields
+	root := t.TempDir()
+	tc := tool.ToolCallRequest{
+		ToolName: "list_files",
+		Input:    json.RawMessage(`{"path":"."}`),
+	}
+	opts := tool.ToolOptions{WorkspaceRoot: root}
+	resp := tool.ExecuteToolCall(tc, opts)
+	output := tool.FormatToolOutput(resp)
+
+	if !strings.Contains(output, `"tool_name":"list_files"`) {
+		t.Errorf("output should contain tool_name, got: %s", output)
+	}
+	if !strings.Contains(output, `"success":true`) {
+		t.Errorf("output should indicate success, got: %s", output)
 	}
 }

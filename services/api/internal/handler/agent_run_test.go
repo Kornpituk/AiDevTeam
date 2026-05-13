@@ -14,6 +14,7 @@ import (
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/llm"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/service"
+	"github.com/Kornpituk/AiDevTeam/services/api/internal/tool"
 	"github.com/gorilla/mux"
 )
 
@@ -400,6 +401,18 @@ func (m *mockOrchestratorRepo) GetTaskByID(id string) (*model.Task, error) {
 	}, nil
 }
 
+func (m *mockOrchestratorRepo) CreateToolCall(toolCall *model.AgentToolCall) error {
+	return m.returnErr
+}
+
+func (m *mockOrchestratorRepo) UpdateToolCallStatus(id string, status string) (*model.AgentToolCall, error) {
+	return &model.AgentToolCall{ID: id, Status: status}, nil
+}
+
+func (m *mockOrchestratorRepo) CreateApproval(approval *model.HumanApproval) error {
+	return m.returnErr
+}
+
 type mockLLM struct {
 	responses   []string
 	responseIdx int
@@ -507,7 +520,7 @@ func TestStartAgentRun(t *testing.T) {
 			var orch *service.Orchestrator
 			if !tt.useNilOrch {
 				fakeLLM := &mockLLM{}
-				orch = service.NewOrchestrator(orchRepo, fakeLLM)
+				orch = service.NewOrchestrator(orchRepo, fakeLLM, tool.ToolOptions{})
 			}
 
 			handler := NewAgentRunHandler(runRepo, orch)
@@ -604,7 +617,7 @@ func TestCancelAgentRun(t *testing.T) {
 			var orch *service.Orchestrator
 			if !tt.useNilOrch {
 				fakeLLM := &mockLLM{}
-				orch = service.NewOrchestrator(orchRepo, fakeLLM)
+				orch = service.NewOrchestrator(orchRepo, fakeLLM, tool.ToolOptions{})
 			}
 
 			handler := NewAgentRunHandler(runRepo, orch)

@@ -242,6 +242,9 @@ New safe ordering:
 - **C.1.2**: Orchestration Hardening
 - **C.1.2.1**: Concurrent Start Ordering Fix
 - **C.1.3**: Demo Readiness + Task Context
+- **C.2.1**: Read-Only Tool Execution MVP
+- **C.2.2**: Multi-Turn Tool Feedback Loop
+- **C.2.3**: Tool Approval Gates ✅ (NEW)
 
 **Core Functionality Now Available**:
 - ✅ Start/cancel endpoints (`POST /agent-runs/:id/start`, `POST /agent-runs/:id/cancel`)
@@ -252,11 +255,15 @@ New safe ordering:
 - ✅ Clear terminal summaries
 - ✅ Dashboard polling (every 3s while `running`)
 - ✅ Start/Cancel buttons in UI
+- ✅ Read-only tool execution: `list_files`, `read_file`, `search_code`
+- ✅ Tool calls recorded in `agent_tool_calls` table
+- ✅ Multi-turn tool feedback loop (iterative LLM + tool execution)
+- ✅ Tool approval gates (configurable pre-approval checks per tool)
 
 **Limitations (Intentional for MVP)**:
 - No WebSocket (polling only)
 - No distributed queue (in-memory goroutines only)
-- No real dangerous tool execution
+- No write/edit/bash/git tool execution
 - No automatic codebase modification
 - No authentication
 
@@ -362,11 +369,186 @@ New safe ordering:
 
 ---
 
-## Latest Verification (After Phase C.1.3)
+### Phase C.2.1: Read-Only Tool Execution MVP
+
+**Status**: ✅ Complete
+
+**Goal**: Give the orchestration engine "eyes" so agent runs can safely inspect the project workspace without modifying files.
+
+**New Tool Package** (`services/api/internal/tool/`):
+
+| File | Purpose |
+|------|---------|
+| `safety.go` | Path validation, blocked files/dirs, binary detection |
+| `read_file.go` | Read text files with truncation + binary detection |
+| `list_files.go` | List directory contents with depth control |
+| `search_code.go` | Search code with plain text or regex |
+| `registry.go` | Tool registration + definition metadata |
+| `executor.go` | Tool call dispatch, JSON parsing, output formatting |
+
+**Safety features**:
+- Rejects absolute paths and `../` traversal
+- Validates path stays within `WORKSPACE_ROOT`
+- Blocks: `.env`, `.env.*`, `.git`, `node_modules`, `.next`, `dist`, `build`, `vendor`
+- Binary detection by extension + null byte checking
+- Symlink escape detection via `filepath.EvalSymlinks`
+- Output size limits per tool
+
+**Orchestrator Integration**:
+- LLM can trigger tools via `{"tool_calls":[{"tool_name":"...","input":{...}}]}` format in response
+- Tool calls recorded in `agent_tool_calls` with status `completed`/`failed`
+- Tool results stored as `agent_messages` with `role: "tool"`
+- One tool-execution pass per step (no feedback loop in MVP)
+- Tool errors recorded gracefully (do not crash server)
+
+**New Config** (`config.go`):
+- `WORKSPACE_ROOT` — Project root (defaults to cwd)
+- `TOOL_READ_MAX_BYTES` — Max bytes per file (default: 1MB)
+- `TOOL_SEARCH_MAX_RESULTS` — Max search results (default: 50)
+
+**Modified Files**:
+- `config/config.go` — +3 tool env vars + `ToolConfig` struct
+- `service/orchestrator.go` — +`CreateToolCall`/`UpdateToolCallStatus` in interface, tool execution in `executeRun()`
+- `service/orchestrator_repo.go` — +`toolCallRepo`, +2 methods
+- `server/router.go` — wire `toolCallRepo` to orchestrator, resolve workspace root
+- `handler/agent_run_test.go` — updated mock for new interface methods
+- `service/orchestrator_test.go` — updated mocks + 9 new tool integration tests
+
+**Tests Added** (39 total):
+- 12 safety/path validation tests
+- 8 read_file tests
+- 5 list_files tests
+- 5 search_code tests
+- 9 orchestrator tool integration tests
+- All 390 backend tests passing
+
+**Constraint**: Read-only only. No `write_file`, `edit_file`, `bash`, `git`, `apply_patch`.
+
+---
+
+### Phase C.2.2: Multi-Turn Tool Feedback Loop
+
+**Status**: ✅ Complete
+
+**Goal**: Enable the orchestration engine to iterate with the LLM — execute tool calls, feed results back, and let the LLM decide the next step.
+
+**What Changed** (`services/api/internal/service/orchestrator.go`):
+
+The `executeRun` function now loops per step:
+
+```
+for iter := 0; iter < MaxToolIterations; iter++ {
+    1. Call LLM → response
+    2. Store assistant message in agent_messages
+    3. Append assistant message to LLM context
+    4. Parse tool_calls from response
+    5. If no tool_calls → final response, break
+    6. Execute all tool calls
+    7. Store tool calls in agent_tool_calls
+    8. Store tool results as agent_messages (role: "tool")
+    9. Append tool results to LLM context
+    10. Continue loop
+}
+```
+
+- Step output = final non-tool-call LLM response (the iteration where no `tool_calls` are found)
+- If `MaxToolIterations` is reached without a non-tool-call response, falls back to `"Step completed."`
+- Loop is cancel-safe: each iteration checks `ctx.Done()` before LLM call and after execution
+- All messages stored in DB for observability
+
+**New Config**:
+- `TOOL_MAX_ITERATIONS` env var (default: 10) — added to `config.ToolConfig.MaxToolIterations`
+- Wired through `tool.ToolOptions.MaxToolIterations` in `router.go`
+
+**Test Updates** (`orchestrator_test.go`):
+- Refactored `toolResponseLLM` → `newToolResponseLLM(responses ...string)` supporting variadic multi-turn responses
+- Updated 3 integration tests to provide two-turn responses:
+  1. `TestExecuteRun_ToolCallsCreateAgentToolCallRecords` — tool call → normal text
+  2. `TestExecuteRun_ToolResultCreatesToolMessage` — tool call → normal text
+  3. `TestExecuteRun_FailedToolCallDoesNotCrash` — unknown tool → normal text
+- All 391 backend tests passing (+1 dedicated multi-turn feed verification test)
+
+**Files Modified**:
+- `services/api/internal/service/orchestrator.go` — multi-turn loop in `executeRun()` (core change)
+- `services/api/internal/config/config.go` — `MaxToolIterations` in `ToolConfig`
+- `services/api/internal/server/router.go` — wire `MaxToolIterations` into `tool.ToolOptions`
+- `services/api/internal/tool/registry.go` — `MaxToolIterations` field in `ToolOptions`
+- `services/api/internal/service/orchestrator_test.go` — refactored mocks + multi-turn responses + dedicated multi-turn feed verification test
+
+**Key Design Decisions**:
+- Full conversation history preserved: each LLM call gets `system + user + assistant + tool` messages
+- Tool results appended to context immediately after tool execution
+- Loop breaks on any non-tool-call response (LLM's natural final answer)
+- Max iterations safety valve prevents runaway loops
+- Single LLM response per iteration (no `n > 1`)
+
+---
+
+### Phase C.2.3: Tool Approval Gates
+
+**Status**: ✅ Complete
+
+**Goal**: Add pre-approval checks before tool execution — when an LLM requests a tool that requires human approval, the orchestrator creates a `human_approval` record and skips execution instead of running the tool immediately.
+
+**What Changed**:
+
+**Backend — Tool Options** (`tool/registry.go`):
+- Added `RequireApproval []string` field to `ToolOptions`
+- Added `RequiresApproval(toolName string) bool` method
+
+**Backend — Config** (`config/config.go`):
+- Added `TOOL_REQUIRE_APPROVAL` env var (comma-separated tool names, default empty)
+
+**Backend — Router** (`server/router.go`):
+- Parses comma-separated env var into `[]string`
+- Wires into `tool.ToolOptions.RequireApproval`
+- Passes `approvalRepo` to `NewOrchestratorRepoImpl`
+
+**Backend — Orchestrator** (`service/orchestrator.go`):
+- Adds `CreateApproval` to `OrchestratorRepository` interface
+- In the multi-turn tool execution loop, before executing each tool:
+  - If `RequiresApproval` → creates `human_approval` (status: `pending`) + `agent_tool_call` (status: `recorded`) + tool message ("requires human approval"); skips execution
+  - Otherwise → executes tool normally
+
+**Backend — Repo** (`service/orchestrator_repo.go`):
+- Added `approvalRepo` field + `CreateApproval` implementation
+
+**Frontend** (`HumanApprovalsPanel.tsx`, `AgentRunDetail.tsx`):
+- Added `runStatus` prop to `HumanApprovalsPanel`
+- Approvals panel polls every 3s while run is `running` to show auto-created approvals
+
+**Tests Added** (3 new, 394 total):
+1. `TestExecuteRun_ToolWithApprovalCreatesApprovalRecord` — verifies `recorded` status + approval message
+2. `TestExecuteRun_ToolWithoutApprovalExecutesNormally` — verifies `completed` status + no approval message
+3. `TestExecuteRun_ToolWithApprovalDoesNotFailRun` — verifies approval gate doesn't fail the run
+
+**Files Modified**:
+- `services/api/internal/tool/registry.go` — RequireApproval field + method
+- `services/api/internal/config/config.go` — TOOL_REQUIRE_APPROVAL env var
+- `services/api/internal/server/router.go` — parse + wire approval config
+- `services/api/internal/service/orchestrator.go` — approval gate logic in loop
+- `services/api/internal/service/orchestrator_repo.go` — approvalRepo integration
+- `services/api/internal/service/orchestrator_test.go` — 3 new approval gate tests
+- `services/api/internal/handler/agent_run_test.go` — mock CreateApproval method
+- `apps/web/components/AgentRuns/HumanApprovalsPanel.tsx` — polling + runStatus prop
+- `apps/web/components/AgentRuns/AgentRunDetail.tsx` — pass runStatus to panel
+
+**Key Design Decisions**:
+- Configurable per tool via `TOOL_REQUIRE_APPROVAL` env var
+- Approval gate does NOT fail the step — LLM continues with feedback
+- No automatic execution after approval (requires pause/resume, out of scope)
+- Uses existing `human_approvals` table — no schema changes
+
+---
+
+## Latest Verification (After Phase C.2.3)
 
 ### Backend
 - `go test ./...` → All passing
-- Orchestrator tests: ~40 tests covering all hardening scenarios
+- 394 test cases (+3 tool approval gate tests)
+- Tool package: `internal/tool/` with RequireApproval support
+- Multi-turn loop with approval gates in `internal/service/orchestrator.go`
+- No new migrations
 
 ### Frontend
 - `npm run test:run` → 54 tests passing
@@ -384,6 +566,17 @@ See `docs/CURRENT_STATUS.md` for full list.
 ### Key Phase C Endpoints
 - `POST /agent-runs/:id/start` - Start run execution
 - `POST /agent-runs/:id/cancel` - Cancel run execution
+
+### Read-Only Tools Available
+- `list_files` - List directory contents
+- `read_file` - Read text file contents
+- `search_code` - Search code with text or regex
+
+### Multi-Turn Tool Loop
+- Iterative: LLM → tool calls → execute/approve → feed results back → re-query LLM → repeat
+- Default max iterations: 10 (configurable via `TOOL_MAX_ITERATIONS`)
+- Full conversation history preserved in each LLM call
+- Approval gates: configurable per tool via `TOOL_REQUIRE_APPROVAL`
 
 ---
 

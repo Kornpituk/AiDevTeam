@@ -298,6 +298,7 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
           <HumanApprovalsPanel
             runId={runId}
             steps={steps}
+            runStatus={run?.status}
           />
 
           <ToolCallsPanel

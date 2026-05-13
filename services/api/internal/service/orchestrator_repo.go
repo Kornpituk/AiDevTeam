@@ -12,6 +12,8 @@ type OrchestratorRepoImpl struct {
 	profileRepo    *repository.AgentProfileRepository
 	messageRepo    *repository.AgentMessageRepository
 	taskRepo       *repository.TaskRepository
+	toolCallRepo   *repository.AgentToolCallRepository
+	approvalRepo   *repository.HumanApprovalRepository
 }
 
 func NewOrchestratorRepoImpl(
@@ -21,6 +23,8 @@ func NewOrchestratorRepoImpl(
 	profileRepo *repository.AgentProfileRepository,
 	messageRepo *repository.AgentMessageRepository,
 	taskRepo *repository.TaskRepository,
+	toolCallRepo *repository.AgentToolCallRepository,
+	approvalRepo *repository.HumanApprovalRepository,
 ) *OrchestratorRepoImpl {
 	return &OrchestratorRepoImpl{
 		runRepo:        runRepo,
@@ -29,6 +33,8 @@ func NewOrchestratorRepoImpl(
 		profileRepo:    profileRepo,
 		messageRepo:    messageRepo,
 		taskRepo:       taskRepo,
+		toolCallRepo:   toolCallRepo,
+		approvalRepo:   approvalRepo,
 	}
 }
 
@@ -82,4 +88,16 @@ func (r *OrchestratorRepoImpl) UpdateRunSummary(id string, summary string) (*mod
 
 func (r *OrchestratorRepoImpl) GetTaskByID(id string) (*model.Task, error) {
 	return r.taskRepo.GetByID(id)
+}
+
+func (r *OrchestratorRepoImpl) CreateToolCall(toolCall *model.AgentToolCall) error {
+	return r.toolCallRepo.Create(toolCall)
+}
+
+func (r *OrchestratorRepoImpl) UpdateToolCallStatus(id string, status string) (*model.AgentToolCall, error) {
+	return r.toolCallRepo.UpdateStatus(id, status)
+}
+
+func (r *OrchestratorRepoImpl) CreateApproval(approval *model.HumanApproval) error {
+	return r.approvalRepo.Create(approval)
 }

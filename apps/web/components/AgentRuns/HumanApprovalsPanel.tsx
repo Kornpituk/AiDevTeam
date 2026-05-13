@@ -16,9 +16,10 @@ import { formatDate } from '@/lib/utils'
 interface HumanApprovalsPanelProps {
   runId: string
   steps: AgentRunStep[]
+  runStatus?: string
 }
 
-export function HumanApprovalsPanel({ runId, steps }: HumanApprovalsPanelProps) {
+export function HumanApprovalsPanel({ runId, steps, runStatus }: HumanApprovalsPanelProps) {
   const [approvals, setApprovals] = useState<HumanApproval[]>([])
   const [loading, setLoading] = useState(true)
   const [showAddForm, setShowAddForm] = useState(false)
@@ -38,6 +39,22 @@ export function HumanApprovalsPanel({ runId, steps }: HumanApprovalsPanelProps) 
 
     fetchApprovals()
   }, [runId])
+
+  // Poll for new approvals while run is running
+  useEffect(() => {
+    if (runStatus !== 'running') return
+
+    const intervalId = setInterval(async () => {
+      try {
+        const data = await getHumanApprovals(runId)
+        setApprovals(data)
+      } catch (err) {
+        console.error('Approval polling error:', err)
+      }
+    }, 3000)
+
+    return () => clearInterval(intervalId)
+  }, [runId, runStatus])
 
   function handleApprovalAdded(approval: HumanApproval) {
     setApprovals((prev) => [...prev, approval])

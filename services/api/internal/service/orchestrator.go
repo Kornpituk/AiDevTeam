@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/llm"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
+	"github.com/Kornpituk/AiDevTeam/services/api/internal/tool"
 )
 
 type OrchestratorRepository interface {
@@ -24,20 +26,25 @@ type OrchestratorRepository interface {
 	CreateMessage(message *model.AgentMessage) error
 	UpdateRunSummary(id string, summary string) (*model.AgentRun, error)
 	GetTaskByID(taskID string) (*model.Task, error)
+	CreateToolCall(toolCall *model.AgentToolCall) error
+	UpdateToolCallStatus(id string, status string) (*model.AgentToolCall, error)
+	CreateApproval(approval *model.HumanApproval) error
 }
 
 type Orchestrator struct {
-	repo    OrchestratorRepository
-	llm     llm.LLMProvider
-	running map[string]context.CancelFunc
-	mu      sync.Mutex
+	repo     OrchestratorRepository
+	llm      llm.LLMProvider
+	running  map[string]context.CancelFunc
+	mu       sync.Mutex
+	toolOpts tool.ToolOptions
 }
 
-func NewOrchestrator(repo OrchestratorRepository, llmProvider llm.LLMProvider) *Orchestrator {
+func NewOrchestrator(repo OrchestratorRepository, llmProvider llm.LLMProvider, toolOpts tool.ToolOptions) *Orchestrator {
 	return &Orchestrator{
-		repo:    repo,
-		llm:     llmProvider,
-		running: make(map[string]context.CancelFunc),
+		repo:     repo,
+		llm:      llmProvider,
+		running:  make(map[string]context.CancelFunc),
+		toolOpts: toolOpts,
 	}
 }
 
@@ -307,27 +314,129 @@ Review Notes: %s
 			},
 		}
 
-		response, err := o.llm.ChatCompletion(ctx, messages)
-		if err != nil {
-			if ctx.Err() != nil {
+		maxIter := o.toolOpts.MaxToolIterations
+		if maxIter <= 0 {
+			maxIter = 10
+		}
+
+		var finalResponse string
+
+		for iter := 0; iter < maxIter; iter++ {
+			select {
+			case <-ctx.Done():
 				_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
 				_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
 				return
+			default:
 			}
-			_, _ = o.repo.MarkStepFailed(step.ID, "Run failed: error during step execution.")
-			_, _ = o.repo.UpdateRunStatus(runID, "failed")
-			return
+
+			response, err := o.llm.ChatCompletion(ctx, messages)
+			if err != nil {
+				if ctx.Err() != nil {
+					_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+					_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
+					return
+				}
+				_, _ = o.repo.MarkStepFailed(step.ID, "Run failed: error during step execution.")
+				_, _ = o.repo.UpdateRunStatus(runID, "failed")
+				return
+			}
+
+			// Store assistant message in DB
+			asstMsg := &model.AgentMessage{
+				RunID:     runID,
+				StepID:    step.ID,
+				ProfileID: step.ProfileID,
+				Role:      "assistant",
+				Content:   response,
+				Metadata:  []byte("{}"),
+			}
+			_ = o.repo.CreateMessage(asstMsg)
+
+			// Add to LLM conversation context
+			messages = append(messages, llm.Message{Role: "assistant", Content: response})
+
+			// Check for tool calls in the response
+			toolCalls, _ := tool.ParseToolCalls(response)
+			if len(toolCalls) == 0 {
+				// No more tool calls — this is the final response
+				finalResponse = response
+				break
+			}
+
+			// Execute tool calls and record results
+			for _, tc := range toolCalls {
+				inputJSON, _ := json.Marshal(tc.Input)
+
+				if o.toolOpts.RequiresApproval(tc.ToolName) {
+					// --- APPROVAL GATE ---
+					approval := &model.HumanApproval{
+						RunID:         runID,
+						StepID:        step.ID,
+						ApprovalType:  "tool:" + tc.ToolName,
+						Status:        "pending",
+						RequestedBy:   "system",
+						RequestNotes:  string(inputJSON),
+					}
+					_ = o.repo.CreateApproval(approval)
+
+					toolCall := &model.AgentToolCall{
+						RunID:    runID,
+						StepID:   step.ID,
+						ToolName: tc.ToolName,
+						Input:    inputJSON,
+						Status:   "recorded",
+					}
+					_ = o.repo.CreateToolCall(toolCall)
+
+					toolResult := fmt.Sprintf(`{"tool_name":"%s","success":false,"error":"Tool requires human approval. Approval ID: %s"}`, tc.ToolName, approval.ID)
+					toolMsg := &model.AgentMessage{
+						RunID:    runID,
+						StepID:   step.ID,
+						Role:     "tool",
+						Content:  toolResult,
+						Metadata: []byte("{}"),
+					}
+					_ = o.repo.CreateMessage(toolMsg)
+					messages = append(messages, llm.Message{Role: "tool", Content: toolResult})
+				} else {
+					// --- NORMAL EXECUTION ---
+					tr := tool.ExecuteToolCall(tc, o.toolOpts)
+					status := "completed"
+					if !tr.Success {
+						status = "failed"
+					}
+					outputJSON := []byte(tool.FormatToolOutput(tr))
+					toolCall := &model.AgentToolCall{
+						RunID:    runID,
+						StepID:   step.ID,
+						ToolName: tc.ToolName,
+						Input:    inputJSON,
+						Output:   outputJSON,
+						Status:   status,
+					}
+					_ = o.repo.CreateToolCall(toolCall)
+
+					toolResult := tool.FormatToolOutput(tr)
+					toolMsg := &model.AgentMessage{
+						RunID:    runID,
+						StepID:   step.ID,
+						Role:     "tool",
+						Content:  toolResult,
+						Metadata: []byte("{}"),
+					}
+					_ = o.repo.CreateMessage(toolMsg)
+
+					// Add tool result to LLM context for next iteration
+					messages = append(messages, llm.Message{Role: "tool", Content: toolResult})
+				}
+			}
+
 		}
 
-		message := &model.AgentMessage{
-			RunID:     runID,
-			StepID:    step.ID,
-			ProfileID: step.ProfileID,
-			Role:      "assistant",
-			Content:   response,
-			Metadata:  []byte("{}"),
+		if finalResponse == "" {
+			finalResponse = "Step completed."
 		}
-		_ = o.repo.CreateMessage(message)
 
 		select {
 		case <-ctx.Done():
@@ -337,7 +446,7 @@ Review Notes: %s
 		default:
 		}
 
-		_, err = o.repo.MarkStepCompleted(step.ID, response)
+		_, err = o.repo.MarkStepCompleted(step.ID, finalResponse)
 		if err != nil {
 			if ctx.Err() != nil {
 				_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
@@ -348,7 +457,7 @@ Review Notes: %s
 			return
 		}
 
-		stepOutputs = append(stepOutputs, response)
+		stepOutputs = append(stepOutputs, finalResponse)
 	}
 
 	select {

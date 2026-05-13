@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/config"
@@ -11,6 +13,7 @@ import (
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/llm"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/repository"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/service"
+	"github.com/Kornpituk/AiDevTeam/services/api/internal/tool"
 	_ "github.com/lib/pq"
 )
 
@@ -100,8 +103,32 @@ func NewServer(cfg *config.Config) *Server {
 		llmProvider = llm.NewFakeProvider()
 	}
 
-	orchestratorRepo := service.NewOrchestratorRepoImpl(runRepo, stepRepo, teamMemberRepo, profileRepo, messageRepo, taskRepo)
-	orchestrator := service.NewOrchestrator(orchestratorRepo, llmProvider)
+	orchestratorRepo := service.NewOrchestratorRepoImpl(runRepo, stepRepo, teamMemberRepo, profileRepo, messageRepo, taskRepo, toolCallRepo, approvalRepo)
+
+	workspaceRoot := cfg.Tool.WorkspaceRoot
+	if workspaceRoot == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			log.Fatalf("WORKSPACE_ROOT is not set and cannot determine current working directory: %v", err)
+		}
+		workspaceRoot = cwd
+	}
+	maxIter := cfg.Tool.MaxToolIterations
+	if maxIter <= 0 {
+		maxIter = 10
+	}
+	var requireApproval []string
+	if cfg.Tool.RequireApproval != "" {
+		requireApproval = strings.Split(cfg.Tool.RequireApproval, ",")
+	}
+	toolOpts := tool.ToolOptions{
+		WorkspaceRoot:     workspaceRoot,
+		ReadMaxBytes:      cfg.Tool.ReadMaxBytes,
+		SearchMaxResults:  cfg.Tool.SearchMaxResults,
+		MaxToolIterations: maxIter,
+		RequireApproval:   requireApproval,
+	}
+	orchestrator := service.NewOrchestrator(orchestratorRepo, llmProvider, toolOpts)
 
 	taskHandler := handler.NewTaskHandler(taskRepo)
 	eventHandler := handler.NewEventHandler(eventRepo)
