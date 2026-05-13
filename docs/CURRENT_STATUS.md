@@ -119,7 +119,7 @@ components/
   AgentRuns/
     AgentRunDetail.tsx         - Run detail page with panels
     AgentMessagesPanel.tsx     - Messages list + add form
-    HumanApprovalsPanel.tsx    - Approvals list + status selector
+    HumanApprovalsPanel.tsx    - Approvals list + approve/reject buttons + tool input/output display
     ToolCallsPanel.tsx         - Tool calls list + status selector
     AgentRunBadges.tsx         - Status badges
     AddAgentMessageForm.tsx    - Add message form
@@ -287,6 +287,7 @@ Last verified after Phase C.3:
 
 - **Write tool execution** (`write_file`, `edit_file`, `bash`, `git`) — ✅ Implemented with full safety guards
 - **Approval Auto-Resume** — ✅ When a human approves a tool via PATCH, the orchestrator automatically executes the tool and feeds the result into the LLM conversation, without manual re-run
+- **Approvals Dashboard** — ✅ Rich UI with Approve/Reject buttons, tool input as formatted JSON, tool call result correlation, inline error handling
 - **Function-specific `tool_choice`** — only string values supported (`none`/`auto`/`required`); cannot force a specific tool yet
 
 ### Limitations (By Design for MVP)

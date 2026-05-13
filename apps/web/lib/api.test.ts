@@ -166,6 +166,7 @@ const mockHumanApprovals: HumanApproval[] = [
     approval_type: "step_execution",
     status: "pending",
     request_notes: "Need approval before executing this step.",
+    tool_call_id: "tc1",
     created_at: "2024-01-01T00:00:00Z",
   },
   {

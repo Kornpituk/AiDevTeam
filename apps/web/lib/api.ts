@@ -418,6 +418,7 @@ export interface HumanApproval {
   decided_by?: string;
   request_notes?: string;
   decision_notes?: string;
+  tool_call_id?: string;
   created_at: string;
   decided_at?: string;
 }

@@ -248,7 +248,8 @@ New safe ordering:
 - **C.2.4**: Native LLM Function Calling
 - **C.2.5**: `tool_choice` Parameter
 - **C.3**: Write Tool Execution (write_file, edit_file, bash, git) ✅
-- **C.3.1**: Approval Auto-Resume ✅ (NEW)
+- **C.3.1**: Approval Auto-Resume ✅
+- **C.3.2**: Approvals Dashboard ✅ (NEW)
 
 **Core Functionality Now Available**:
 - ✅ Start/cancel endpoints
@@ -270,6 +271,7 @@ New safe ordering:
 - ✅ Git command safety (18 blocked destructive commands)
 - ✅ Write path safety (binary reject, null byte check, size limit, blocked dirs)
 - ✅ Approval auto-resume (approved tools auto-execute and feed results to LLM)
+- ✅ Approvals Dashboard (approve/reject buttons, tool input/output display, auto-refresh)
 
 **Limitations (Intentional for MVP)**:
 - No WebSocket (polling only)
@@ -742,7 +744,38 @@ for iter := 0; iter < MaxToolIterations; iter++ {
 
 ---
 
-## Latest Verification (After Phase C.3)
+### C.3.2: Approvals Dashboard
+
+**Status**: ✅ Complete
+
+**Goal**: Add rich approval management UI: big Approve/Reject buttons for pending approvals, tool input/output display, auto-refresh after action.
+
+**What Changed**:
+
+| File | Changes |
+|------|---------|
+| `apps/web/lib/api.ts` | Added `tool_call_id?: string` to `HumanApproval` interface |
+| `apps/web/lib/api.test.ts` | Added `tool_call_id: "tc1"` to mock approval |
+| `apps/web/components/AgentRuns/HumanApprovalsPanel.tsx` | Major rewrite: approve/reject buttons with loading states, tool name extraction from `approval_type`, tool input as formatted JSON (expandable), tool call correlation via `tool_call_id`, tool result display (expandable), inline error handling, parallel fetch of approvals + tool calls on mount and polling |
+
+**Key Features**:
+- **✅ Approve button**: Green button, calls `PATCH /human-approvals/:id/status` with `"approved"`
+- **❌ Reject button**: Red button, calls PATCH with `"rejected"`
+- **Loading spinner**: Shows on clicked button, disables both buttons during API call
+- **Dropdown (kept)**: For changing to "cancelled" status
+- **Tool input**: Expandable `<details>` with formatted JSON from `request_notes`
+- **Tool result**: For approved approvals with `tool_call_id`, shows tool call output in green `<pre>` block
+- **Error handling**: Inline red banner on action failure
+- **Polling**: Fetches both approvals AND tool calls every 3s while running
+
+**Verification**:
+- `npm run test:run` → 54 tests passing
+- `npm run lint` → No warnings/errors
+- `npm run build` → Compiles successfully (9 static pages)
+
+---
+
+## Latest Verification (After Phase C.3.2)
 
 ### Backend
 - `go test ./...` → All passing (126 test cases across all packages)
@@ -761,7 +794,10 @@ for iter := 0; iter < MaxToolIterations; iter++ {
 - No new migrations
 
 ### Frontend
-- `npm run test:run` → 54 tests passing (unchanged)
+- `npm run test:run` → 54 tests passing
+- `npm run lint` → No warnings/errors
+- `npm run build` → Compiles successfully (9 static pages)
+- **Approvals Dashboard**: Approve/Reject buttons, tool input/output display, auto-refresh
 - `npm run lint` → No warnings/errors
 - `npm run build` → Success (9 static pages generated)
 
