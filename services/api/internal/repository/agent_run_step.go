@@ -160,7 +160,35 @@ func (r *AgentRunStepRepository) UpdateOutput(id string, status string, output s
 }
 
 func (r *AgentRunStepRepository) MarkStarted(id string) (*model.AgentRunStep, error) {
-	query := `UPDATE agent_run_steps SET status = 'running', started_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING id, run_id, profile_id, step_type, status, title, instructions, output, position, started_at, completed_at, created_at, updated_at`
+	query := `UPDATE agent_run_steps SET status = 'running', started_at = COALESCE(started_at, NOW()), updated_at = NOW() WHERE id = $1 RETURNING id, run_id, profile_id, step_type, status, title, instructions, output, position, started_at, completed_at, created_at, updated_at`
+	var step model.AgentRunStep
+	var profileID sql.NullString
+	var stepType sql.NullString
+	var instructions sql.NullString
+	var output sql.NullString
+	var startedAt sql.NullTime
+	var completedAt sql.NullTime
+	err := r.db.QueryRow(query, id).Scan(&step.ID, &step.RunID, &profileID, &stepType, &step.Status, &step.Title, &instructions, &output, &step.Position, &startedAt, &completedAt, &step.CreatedAt, &step.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	step.ProfileID = profileID.String
+	step.StepType = stepType.String
+	step.Instructions = instructions.String
+	step.Output = output.String
+	if startedAt.Valid {
+		t := startedAt.Time
+		step.StartedAt = &t
+	}
+	if completedAt.Valid {
+		t := completedAt.Time
+		step.CompletedAt = &t
+	}
+	return &step, nil
+}
+
+func (r *AgentRunStepRepository) MarkWaitingApproval(id string) (*model.AgentRunStep, error) {
+	query := `UPDATE agent_run_steps SET status = 'waiting_approval', updated_at = NOW() WHERE id = $1 RETURNING id, run_id, profile_id, step_type, status, title, instructions, output, position, started_at, completed_at, created_at, updated_at`
 	var step model.AgentRunStep
 	var profileID sql.NullString
 	var stepType sql.NullString

@@ -235,7 +235,7 @@ New safe ordering:
 
 ### Next Step: Further Phases
 
-**Phase C**: Auto Orchestration MVP - Core Complete (including write tools)
+**Phase C**: Auto Orchestration MVP - Core Complete (including Pause/Resume)
 
 **Completed Phases in C**:
 - **C.1.1**: Runtime Correctness Fixes
@@ -249,34 +249,35 @@ New safe ordering:
 - **C.2.5**: `tool_choice` Parameter
 - **C.3**: Write Tool Execution (write_file, edit_file, bash, git) ✅
 - **C.3.1**: Approval Auto-Resume ✅
-- **C.3.2**: Approvals Dashboard ✅ (NEW)
+- **C.3.2**: Approvals Dashboard ✅
+- **C.4**: Pause/Resume ✅ (NEW)
 
 **Core Functionality Now Available**:
-- ✅ Start/cancel endpoints
+- ✅ Start/cancel/resume endpoints
 - ✅ Atomic status transitions
 - ✅ Only pending steps executed
 - ✅ Existing failed steps fail the run immediately
 - ✅ Context cancellation properly marks as `cancelled`
 - ✅ Clear terminal summaries
-- ✅ Dashboard polling (every 3s while `running`)
-- ✅ Start/Cancel buttons in UI
+- ✅ Dashboard polling (every 3s while `running` or `paused`)
+- ✅ Start/Cancel/Resume buttons in UI
 - ✅ Read-only tool execution: `list_files`, `read_file`, `search_code`
 - ✅ Write tool execution: `write_file`, `edit_file`, `bash`, `git`
 - ✅ Tool calls recorded in `agent_tool_calls` table
 - ✅ Multi-turn tool feedback loop (iterative LLM + tool execution)
 - ✅ Tool approval gates (configurable pre-approval checks per tool)
+- ✅ Pause/Resume — approval gate pauses execution; resume auto-executes approved tools
 - ✅ Native LLM function calling (OpenAI `tools` API, with text fallback)
 - ✅ `tool_choice` parameter (`none`/`auto`/`required` via `TOOL_CHOICE` env var)
 - ✅ Bash command safety (40 blocked patterns, timeout, output limits)
 - ✅ Git command safety (18 blocked destructive commands)
 - ✅ Write path safety (binary reject, null byte check, size limit, blocked dirs)
 - ✅ Approval auto-resume (approved tools auto-execute and feed results to LLM)
-- ✅ Approvals Dashboard (approve/reject buttons, tool input/output display, auto-refresh)
+- ✅ Approvals Dashboard (approve/reject buttons, tool input/output display, auto-refresh, auto-resume)
 
 **Limitations (Intentional for MVP)**:
 - No WebSocket (polling only)
 - No distributed queue (in-memory goroutines only)
-- No pause/resume (execution doesn't block waiting for approval)
 - No authentication
 
 ---
@@ -773,15 +774,69 @@ for iter := 0; iter < MaxToolIterations; iter++ {
 - `npm run lint` → No warnings/errors
 - `npm run build` → Compiles successfully (9 static pages)
 
+### Phase C.4: Pause/Resume
+
+**Status**: ✅ Complete
+
+**Goal**: When the orchestrator encounters a tool that requires human approval, pause the run entirely instead of continuing. When the human approves, auto-resume and execute the approved tool.
+
+**What Changed**:
+
+**Backend — Orchestrator** (`service/orchestrator.go`):
+- **Approval gate now PAUSES** the run instead of continuing with a "requires approval" message:
+  1. Creates tool_call (status: "recorded")
+  2. Creates approval (status: "pending", linked via tool_call_id)
+  3. Marks step as `waiting_approval`
+  4. Marks run as `paused`
+  5. Exits the goroutine (defer cleans up the running map)
+- **Added `ResumeRun` method**: Validates run is `paused`, atomically transitions to `running`, registers in running map, starts new `executeRun` goroutine
+- **Step re-entry on resume**: When `executeRun` encounters a step with `waiting_approval`, it reloads all messages from DB to rebuild the LLM context and continues execution from where it left off
+- **Auto-resume integration**: The existing auto-resume check (before each LLM call) finds the approved tool call and executes it, feeding the result into the LLM context
+- Added `"waiting_approval"` to the pending step list so it's processed on resume
+
+**Backend — Repository**:
+- `agent_run_step.go`: Modified `MarkStarted` to use `COALESCE(started_at, NOW())` to preserve original timestamps; added `MarkWaitingApproval` method
+- `agent_message.go`: Added `GetByStepID` method to reload messages on resume
+
+**Backend — Handler**:
+- `agent_run.go`: Added `ResumeAgentRun` handler → `POST /agent-runs/{id}/resume`
+- `server/router.go`: Added resume route
+
+**Frontend** (`apps/web/`):
+- `lib/api.ts`: Added `resumeAgentRun()` API function
+- `AgentRunDetail.tsx`: Added "▶ Resume Run" amber button for paused runs; extended polling to also run when paused; added `handleResumeRun` handler
+- `HumanApprovalsPanel.tsx`: After successful approve/reject, auto-resumes the run if it's paused; extended polling to also run when paused
+
+**Key Design Decisions**:
+- Pause exits the goroutine entirely (no background polling for approval)
+- Resume starts a fresh goroutine that re-enters `executeRun`
+- Step messages are persisted in DB, so resume can rebuild LLM context from stored messages
+- Auto-resume (from C.3.1) works transparently: resume → execute tool → feed result to LLM
+- No new migrations needed (all statuses already existed in the enum)
+
+**Tests Added/Updated**:
+- `TestExecuteRun_ToolWithApprovalCreatesApprovalRecord` — now expects `paused` (not `completed`)
+- `TestExecuteRun_ToolWithApprovalDoesNotFailRun` — now expects `paused` (not `completed`)
+- `TestExecuteRun_AutoResumeExecutesApprovedToolCall` — restructured into two-phase test (pause → resume)
+- `TestResumeRun_OnlyWorksForPaused` — validates resume succeeds for paused runs
+- `TestResumeRun_FailsForNonPaused` — validates resume fails for non-paused statuses
+- Handler test: `TestResumeAgentRun` — tests all resume handler scenarios
+
+**Verification**:
+- Backend: `go test ./...` → All passing (128+ test cases)
+- Frontend: `npm run test:run` → 54 tests passing
+- Frontend: `npm run lint` → No warnings/errors
+- Frontend: `npm run build` → Success
+
 ---
 
-## Latest Verification (After Phase C.3.2)
+## Latest Verification (After Phase C.4)
 
 ### Backend
-- `go test ./...` → All passing (126 test cases across all packages)
-  - `internal/tool`: 83 tests (was 28 — added 55 new tests for write tools + safety)
-  - `internal/service`: All passing
-  - `internal/handler`: All passing
+- `go test ./...` → All passing (128+ test cases across all packages)
+  - `internal/tool`: 83 tests
+  - `internal/service`: All passing (15+ tests including pause/resume)
+  - `internal/handler`: All passing (10+ tests including resume handler)
   - `internal/config`: All passing
   - `internal/server`: All passing
 - LLM interface: `ChatCompletionWithTools` with native function calling + `tool_choice`
@@ -791,20 +846,23 @@ for iter := 0; iter < MaxToolIterations; iter++ {
 - Safety framework: path validation, binary detection, null byte checks, bash blocklist (40 patterns), git blocklist (18 commands), timeouts, output limits
 - Multi-turn loop with approval gates + native tool calls in `internal/service/orchestrator.go`
 - Write tool execution: write_file, edit_file, bash, git
-- No new migrations
+- **Pause/Resume**: Approval gate pauses run; resume starts new goroutine; auto-resume executes approved tools
+- No new migrations needed
 
 ### Frontend
 - `npm run test:run` → 54 tests passing
 - `npm run lint` → No warnings/errors
 - `npm run build` → Compiles successfully (9 static pages)
 - **Approvals Dashboard**: Approve/Reject buttons, tool input/output display, auto-refresh
-- `npm run lint` → No warnings/errors
-- `npm run build` → Success (9 static pages generated)
+- **Resume Button**: "▶ Resume Run" button when run is paused
+- **Auto-resume**: Approving/rejecting a tool approval auto-resumes the paused run
 
 ### Database
 - 2 migrations applied:
   - `000001_init.sql`
   - `000002_agent_orchestration.sql`
+- 1 additive migration:
+  - `000003_approval_tool_link.sql` (Phase C.3.1 — added `tool_call_id` to `human_approvals`)
 
 ### Key Endpoints Available
 See `docs/CURRENT_STATUS.md` for full list.
@@ -812,6 +870,7 @@ See `docs/CURRENT_STATUS.md` for full list.
 ### Key Phase C Endpoints
 - `POST /agent-runs/:id/start` - Start run execution
 - `POST /agent-runs/:id/cancel` - Cancel run execution
+- `POST /agent-runs/:id/resume` - Resume paused run execution
 
 ### All Tools Available (7 total)
 - **Read-only**: `list_files`, `read_file`, `search_code`
@@ -822,6 +881,7 @@ See `docs/CURRENT_STATUS.md` for full list.
 - Default max iterations: 10 (configurable via `TOOL_MAX_ITERATIONS`)
 - Full conversation history preserved in each LLM call
 - Approval gates: configurable per tool via `TOOL_REQUIRE_APPROVAL`
+- **Pause/Resume**: When approval is required, run pauses; resume auto-executes approved tools
 - Native function calling: OpenAI `tools` API with text fallback
 - Write tools: binary rejects, size limits, blocked commands, timeouts
 - **Approval auto-resume**: Approved tool calls are automatically executed and fed back to the LLM

@@ -147,6 +147,35 @@ func (h *AgentRunHandler) StartAgentRun(w http.ResponseWriter, r *http.Request) 
 	respondJSON(w, http.StatusOK, run)
 }
 
+func (h *AgentRunHandler) ResumeAgentRun(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	if !isValidUUID(id) {
+		respondError(w, http.StatusBadRequest, "Invalid agent run ID")
+		return
+	}
+
+	if h.orchestrator == nil {
+		respondError(w, http.StatusInternalServerError, "Orchestrator not initialized")
+		return
+	}
+
+	err := h.orchestrator.ResumeRun(nil, id)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	run, err := h.runRepo.GetByID(id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to get updated run")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, run)
+}
+
 func (h *AgentRunHandler) CancelAgentRun(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]

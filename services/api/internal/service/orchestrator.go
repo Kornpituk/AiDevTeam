@@ -31,6 +31,8 @@ type OrchestratorRepository interface {
 	UpdateToolCallOutput(id string, output []byte, status string) (*model.AgentToolCall, error)
 	CreateApproval(approval *model.HumanApproval) error
 	GetApprovedToolApprovals(runID, stepID string) ([]model.HumanApproval, error)
+	MarkStepWaitingApproval(id string) (*model.AgentRunStep, error)
+	GetMessagesByStepID(stepID string) ([]model.AgentMessage, error)
 }
 
 type Orchestrator struct {
@@ -212,6 +214,8 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 		switch step.Status {
 		case "pending":
 			pending = append(pending, step)
+		case "waiting_approval":
+			pending = append(pending, step)
 		case "completed":
 			completed = append(completed, step)
 		case "skipped":
@@ -305,15 +309,37 @@ Review Notes: %s
 			userContent = fmt.Sprintf("Instructions: %s\n\nPrevious Step Outputs:\n%s", step.Instructions, previousOutputs)
 		}
 
-		messages := []llm.Message{
-			{
-				Role:    "system",
-				Content: profile.SystemPrompt,
-			},
-			{
-				Role:    "user",
-				Content: userContent,
-			},
+		var messages []llm.Message
+
+		if step.Status == "waiting_approval" {
+			// Resume mode: reload existing messages from DB and prepend fresh system+user context
+			existingMessages, loadErr := o.repo.GetMessagesByStepID(step.ID)
+			if loadErr != nil {
+				if ctx.Err() != nil {
+					_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
+					_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
+					return
+				}
+				_, _ = o.repo.UpdateRunStatus(runID, "failed")
+				return
+			}
+			// Fresh system+user context + existing assistant/tool messages from DB
+			messages = append(messages, llm.Message{Role: "system", Content: profile.SystemPrompt})
+			messages = append(messages, llm.Message{Role: "user", Content: userContent})
+			for _, msg := range existingMessages {
+				messages = append(messages, llm.Message{Role: msg.Role, Content: msg.Content})
+			}
+		} else {
+			messages = []llm.Message{
+				{
+					Role:    "system",
+					Content: profile.SystemPrompt,
+				},
+				{
+					Role:    "user",
+					Content: userContent,
+				},
+			}
 		}
 
 		maxIter := o.toolOpts.MaxToolIterations
@@ -439,7 +465,7 @@ Review Notes: %s
 			// Execute tool calls and record results
 			for _, tc := range toolCalls {
 				if o.toolOpts.RequiresApproval(tc.ToolName) {
-					// --- APPROVAL GATE ---
+					// --- APPROVAL GATE: PAUSE RUN ---
 					toolCall := &model.AgentToolCall{
 						RunID:    runID,
 						StepID:   step.ID,
@@ -460,16 +486,13 @@ Review Notes: %s
 					}
 					_ = o.repo.CreateApproval(approval)
 
-					toolResult := fmt.Sprintf(`{"tool_name":"%s","success":false,"error":"Tool requires human approval. Approval ID: %s"}`, tc.ToolName, approval.ID)
-					toolMsg := &model.AgentMessage{
-						RunID:    runID,
-						StepID:   step.ID,
-						Role:     "tool",
-						Content:  toolResult,
-						Metadata: []byte("{}"),
-					}
-					_ = o.repo.CreateMessage(toolMsg)
-					messages = append(messages, llm.Message{Role: "tool", Content: toolResult})
+					// Mark step as waiting_approval and run as paused, then exit
+					_, _ = o.repo.MarkStepWaitingApproval(step.ID)
+					_, _ = o.repo.UpdateRunStatus(runID, "paused")
+					_, _ = o.repo.UpdateRunSummary(runID, "Run paused: waiting for human approval on tool: "+tc.ToolName)
+
+					// Exit the goroutine - the defer will clean up the running map
+					return
 				} else {
 					// --- NORMAL EXECUTION ---
 					toolReq := tool.ToolCallRequest{
@@ -547,6 +570,40 @@ Review Notes: %s
 
 	summary := fmt.Sprintf("Run completed successfully. Executed %d steps.", len(pending))
 	_, _ = o.repo.UpdateRunSummary(runID, summary)
+}
+
+func (o *Orchestrator) ResumeRun(ctx context.Context, runID string) error {
+	run, err := o.repo.GetRunByID(runID)
+	if err != nil {
+		return fmt.Errorf("failed to get run: %w", err)
+	}
+
+	if run.Status != "paused" {
+		return fmt.Errorf("run is not paused: current status is %s", run.Status)
+	}
+
+	// Atomic transition back to running
+	_, err = o.repo.UpdateRunStatusIfIn(runID, "running", []string{"paused"})
+	if err != nil {
+		return fmt.Errorf("failed to resume run: %w", err)
+	}
+
+	// Register in running map
+	execCtx, cancel := context.WithCancel(context.Background())
+	o.mu.Lock()
+	if _, exists := o.running[runID]; exists {
+		o.mu.Unlock()
+		cancel()
+		_, _ = o.repo.UpdateRunStatusIfIn(runID, "paused", []string{"running"})
+		return fmt.Errorf("run is already running")
+	}
+	o.running[runID] = cancel
+	o.mu.Unlock()
+
+	// Start execution goroutine
+	go o.executeRun(execCtx, runID)
+
+	return nil
 }
 
 func (o *Orchestrator) CancelRun(runID string) error {

@@ -8,6 +8,7 @@ import {
   AgentToolCall,
   getAgentToolCalls,
   updateHumanApprovalStatus,
+  resumeAgentRun,
   AgentRunStep,
 } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -82,7 +83,7 @@ export function HumanApprovalsPanel({ runId, steps, runStatus }: HumanApprovalsP
 
   // Poll for new approvals while run is running
   useEffect(() => {
-    if (runStatus !== 'running') return
+    if (runStatus !== 'running' && runStatus !== 'paused') return
 
     const intervalId = setInterval(async () => {
       try {
@@ -124,6 +125,16 @@ export function HumanApprovalsPanel({ runId, steps, runStatus }: HumanApprovalsP
       setApprovals((prev) =>
         prev.map((a) => (a.id === approvalId ? { ...a, status } : a))
       )
+
+      // Auto-resume the run if it's paused and this is a tool approval
+      if (runStatus === 'paused' && (status === 'approved' || status === 'rejected')) {
+        try {
+          await resumeAgentRun(runId)
+        } catch (resumeErr) {
+          // Don't show error for resume failure - it might already be running
+          console.error('Auto-resume failed:', resumeErr)
+        }
+      }
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to update status')
     } finally {

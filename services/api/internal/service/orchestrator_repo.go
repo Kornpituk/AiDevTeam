@@ -109,3 +109,11 @@ func (r *OrchestratorRepoImpl) GetApprovedToolApprovals(runID, stepID string) ([
 func (r *OrchestratorRepoImpl) UpdateToolCallOutput(id string, output []byte, status string) (*model.AgentToolCall, error) {
 	return r.toolCallRepo.UpdateOutput(id, output, status)
 }
+
+func (r *OrchestratorRepoImpl) MarkStepWaitingApproval(id string) (*model.AgentRunStep, error) {
+	return r.stepRepo.MarkWaitingApproval(id)
+}
+
+func (r *OrchestratorRepoImpl) GetMessagesByStepID(stepID string) ([]model.AgentMessage, error) {
+	return r.messageRepo.GetByStepID(stepID)
+}

@@ -14,6 +14,7 @@ import {
   getAgentTeams,
   startAgentRun,
   cancelAgentRun,
+  resumeAgentRun,
 } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -37,7 +38,7 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
   const [loading, setLoading] = useState(true)
   const [showAddStep, setShowAddStep] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [actionLoading, setActionLoading] = useState<'start' | 'cancel' | null>(null)
+  const [actionLoading, setActionLoading] = useState<'start' | 'cancel' | 'resume' | null>(null)
 
   useEffect(() => {
     async function fetchInitialData() {
@@ -69,7 +70,7 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
   }, [runId])
 
   useEffect(() => {
-    if (run?.status !== 'running') {
+    if (run?.status !== 'running' && run?.status !== 'paused') {
       return
     }
 
@@ -118,6 +119,19 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
       setRun(updatedRun)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to cancel run')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  async function handleResumeRun() {
+    if (!run) return
+    setActionLoading('resume')
+    try {
+      const updatedRun = await resumeAgentRun(run.id)
+      setRun(updatedRun)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resume run')
     } finally {
       setActionLoading(null)
     }
@@ -217,17 +231,27 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
                    {actionLoading === 'start' ? 'Starting...' : 'Start Run'}
                  </Button>
                )}
-               {run.status === 'running' && (
-                 <Button
-                   size="sm"
-                   variant="secondary"
-                   onClick={handleCancelRun}
-                   disabled={actionLoading !== null}
-                 >
-                   {actionLoading === 'cancel' ? 'Cancelling...' : 'Cancel Run'}
-                 </Button>
-               )}
-             </div>
+                {run.status === 'running' && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={handleCancelRun}
+                    disabled={actionLoading !== null}
+                  >
+                    {actionLoading === 'cancel' ? 'Cancelling...' : 'Cancel Run'}
+                  </Button>
+                )}
+                {run.status === 'paused' && (
+                  <Button
+                    size="sm"
+                    className="bg-amber-600 hover:bg-amber-700 text-white"
+                    onClick={handleResumeRun}
+                    disabled={actionLoading !== null}
+                  >
+                    {actionLoading === 'resume' ? 'Resuming...' : '▶ Resume Run'}
+                  </Button>
+                )}
+              </div>
            </div>
          </CardHeader>
         <CardContent className="space-y-4">

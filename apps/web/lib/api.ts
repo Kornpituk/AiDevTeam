@@ -323,6 +323,12 @@ export async function cancelAgentRun(id: string): Promise<AgentRun> {
   });
 }
 
+export async function resumeAgentRun(id: string): Promise<AgentRun> {
+  return fetchApi<AgentRun>(`/agent-runs/${id}/resume`, {
+    method: "POST",
+  });
+}
+
 export async function createAgentRun(
   taskId: string,
   data: {

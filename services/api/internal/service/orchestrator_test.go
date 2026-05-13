@@ -219,6 +219,20 @@ func (m *mockOrchestratorRepo) UpdateToolCallOutput(id string, output []byte, st
 	return &model.AgentToolCall{ID: id, Status: status, Output: output}, nil
 }
 
+func (m *mockOrchestratorRepo) MarkStepWaitingApproval(id string) (*model.AgentRunStep, error) {
+	for i := range m.steps {
+		if m.steps[i].ID == id {
+			m.steps[i].Status = "waiting_approval"
+			return &m.steps[i], nil
+		}
+	}
+	return &model.AgentRunStep{ID: id, Status: "waiting_approval"}, nil
+}
+
+func (m *mockOrchestratorRepo) GetMessagesByStepID(stepID string) ([]model.AgentMessage, error) {
+	return nil, nil
+}
+
 type blockingFakeLLM struct {
 	llm.LLMProvider
 	blockChan chan struct{}
@@ -1603,22 +1617,23 @@ func TestExecuteRun_ToolWithApprovalCreatesApprovalRecord(t *testing.T) {
 		t.Errorf("expected status 'recorded', got %q", repo.createdToolCalls[0].Status)
 	}
 
-	// Tool message should mention approval
-	foundApprovalMsg := false
+	// No tool message about approval should have been created (approval gate pauses without creating a tool message)
 	for _, msg := range repo.createdMessages {
 		if msg.Role == "tool" && strings.Contains(msg.Content, "requires human approval") {
-			foundApprovalMsg = true
+			t.Error("approval gate should NOT create a tool message; it should pause instead")
 			break
 		}
 	}
-	if !foundApprovalMsg {
-		t.Error("expected tool message mentioning 'requires human approval'")
+
+	// Run should be paused (not completed)
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "paused" {
+		t.Errorf("expected run to be paused, got %q", lastStatus)
 	}
 
-	// Run should complete
-	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
-	if lastStatus != "completed" {
-		t.Errorf("expected run to complete, got %q", lastStatus)
+	// Step should be waiting_approval
+	if len(repo.steps) > 0 && repo.steps[0].Status != "waiting_approval" {
+		t.Errorf("expected step status 'waiting_approval', got %q", repo.steps[0].Status)
 	}
 }
 
@@ -1700,10 +1715,10 @@ func TestExecuteRun_ToolWithApprovalDoesNotFailRun(t *testing.T) {
 	})
 	orch.executeRun(context.Background(), testRunID)
 
-	// Run should still complete (approval gate != run failure)
+	// Run should pause (not fail) — approval gate causes pause, not failure
 	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
-	if lastStatus != "completed" {
-		t.Errorf("expected run to complete despite approval gate, got %q", lastStatus)
+	if lastStatus != "paused" {
+		t.Errorf("expected run to pause, got %q", lastStatus)
 	}
 }
 
@@ -1756,25 +1771,50 @@ func TestExecuteRun_AutoResumeExecutesApprovedToolCall(t *testing.T) {
 	}
 
 	// LLM: first call returns a tool call, second returns final response
-	llm := newMessagesRecorderLLM(
+	recordingLLM := newMessagesRecorderLLM(
 		`{"tool_calls":[{"tool_name":"read_file","input":{"path":"test.go"}}]}`,
 		`After reviewing the file, I can proceed with the implementation.`,
 	)
 
-	orch := NewOrchestrator(autoResume, llm, tool.ToolOptions{
+	orch := NewOrchestrator(autoResume, recordingLLM, tool.ToolOptions{
 		RequireApproval: []string{"read_file"},
 	})
+
+	// ===== STEP 1: First execution — should pause at approval gate =====
 	orch.executeRun(context.Background(), testRunID)
 
-	// Run should complete
+	// Run should be paused
 	lastStatus := capture.statusHistory[len(capture.statusHistory)-1]
-	if lastStatus != "completed" {
-		t.Errorf("expected run to complete, got %q", lastStatus)
+	if lastStatus != "paused" {
+		t.Fatalf("expected run to pause, got %q", lastStatus)
 	}
 
-	// Tool call should have been created
+	// Tool call should have been created with "recorded" status
 	if len(capture.createdToolCalls) != 1 {
 		t.Fatalf("expected 1 tool call created, got %d", len(capture.createdToolCalls))
+	}
+	if capture.createdToolCalls[0].Status != "recorded" {
+		t.Errorf("expected tool call status 'recorded', got %q", capture.createdToolCalls[0].Status)
+	}
+
+	// Approval should have been created
+	if len(capture.createdApprovals) != 1 {
+		t.Fatalf("expected 1 approval created, got %d", len(capture.createdApprovals))
+	}
+
+	// ===== STEP 2: Simulate resume =====
+	// Update run/step state to reflect paused state for resume
+	capture.run.Status = "paused"
+	// The step is already "waiting_approval" (set by MarkStepWaitingApproval in mock)
+
+	// Second execution — auto-resume will pick up the approved approval
+	// because autoResumeMockRepo.GetApprovedToolApprovals returns approved on call >= 2
+	orch.executeRun(context.Background(), testRunID)
+
+	// Run should complete after resume
+	lastStatus = capture.statusHistory[len(capture.statusHistory)-1]
+	if lastStatus != "completed" {
+		t.Fatalf("expected run to complete after resume, got %q", lastStatus)
 	}
 
 	// UpdateToolCallOutput should have been called (auto-resume executed the tool)
@@ -1782,7 +1822,7 @@ func TestExecuteRun_AutoResumeExecutesApprovedToolCall(t *testing.T) {
 		t.Error("expected UpdateToolCallOutput to be called by auto-resume")
 	}
 
-	// At least one tool message should exist with the result from auto-resume
+	// Tool message should exist with the result from auto-resume
 	toolMessages := 0
 	for _, msg := range capture.createdMessages {
 		if msg.Role == "tool" {
@@ -1793,13 +1833,13 @@ func TestExecuteRun_AutoResumeExecutesApprovedToolCall(t *testing.T) {
 		t.Errorf("expected at least 1 tool message, got %d", toolMessages)
 	}
 
-	// LLM should have been called twice (tool call round + final round)
-	if len(llm.allCalls) != 2 {
-		t.Fatalf("expected 2 LLM calls, got %d", len(llm.allCalls))
+	// LLM should have been called once per execution (total 2 calls)
+	if len(recordingLLM.allCalls) != 2 {
+		t.Fatalf("expected 2 LLM calls, got %d", len(recordingLLM.allCalls))
 	}
 
 	// The second LLM call should contain the tool result from auto-resume
-	secondCall := llm.allCalls[1]
+	secondCall := recordingLLM.allCalls[1]
 	foundToolResult := false
 	for _, msg := range secondCall {
 		if msg.Role == "tool" && strings.Contains(msg.Content, "read_file") {
@@ -1809,6 +1849,60 @@ func TestExecuteRun_AutoResumeExecutesApprovedToolCall(t *testing.T) {
 	}
 	if !foundToolResult {
 		t.Error("expected LLM context in second call to contain tool result with 'read_file'")
+	}
+}
+
+func TestResumeRun_OnlyWorksForPaused(t *testing.T) {
+	pausedRepo := newMockOrchestratorRepo()
+	pausedRepo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "paused",
+	}
+	pausedRepo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "waiting_approval",
+			Position:  1,
+		},
+	}
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(pausedRepo, fakeLLM, tool.ToolOptions{})
+
+	err := orch.ResumeRun(context.Background(), testRunID)
+	if err != nil {
+		t.Fatalf("ResumeRun should succeed for paused run: %v", err)
+	}
+
+	// Clean up
+	orch.mu.Lock()
+	if cancel, exists := orch.running[testRunID]; exists {
+		cancel()
+		delete(orch.running, testRunID)
+	}
+	orch.mu.Unlock()
+}
+
+func TestResumeRun_FailsForNonPaused(t *testing.T) {
+	nonPausedStatuses := []string{"draft", "running", "completed", "failed", "cancelled"}
+	for _, status := range nonPausedStatuses {
+		t.Run("status:"+status, func(t *testing.T) {
+			repo := newMockOrchestratorRepo()
+			repo.run = &model.AgentRun{
+				ID:     testRunID,
+				Status: status,
+			}
+
+			fakeLLM := llm.NewFakeProvider()
+			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+			err := orch.ResumeRun(context.Background(), testRunID)
+			if err == nil {
+				t.Errorf("ResumeRun should fail for %q status", status)
+			}
+		})
 	}
 }
 

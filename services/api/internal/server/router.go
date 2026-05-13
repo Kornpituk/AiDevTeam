@@ -196,6 +196,7 @@ func NewServer(cfg *config.Config) *Server {
 	router.HandleFunc("/agent-runs/{id}", runHandler.GetAgentRun).Methods("GET")
 	router.HandleFunc("/agent-runs/{id}/start", runHandler.StartAgentRun).Methods("POST")
 	router.HandleFunc("/agent-runs/{id}/cancel", runHandler.CancelAgentRun).Methods("POST")
+	router.HandleFunc("/agent-runs/{id}/resume", runHandler.ResumeAgentRun).Methods("POST")
 
 	// Agent Run Steps
 	router.HandleFunc("/agent-runs/{id}/steps", stepHandler.CreateRunStep).Methods("POST")

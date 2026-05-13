@@ -421,6 +421,20 @@ func (m *mockOrchestratorRepo) UpdateToolCallOutput(id string, output []byte, st
 	return &model.AgentToolCall{ID: id, Status: status, Output: output}, nil
 }
 
+func (m *mockOrchestratorRepo) MarkStepWaitingApproval(id string) (*model.AgentRunStep, error) {
+	for i := range m.steps {
+		if m.steps[i].ID == id {
+			m.steps[i].Status = "waiting_approval"
+			return &m.steps[i], nil
+		}
+	}
+	return &model.AgentRunStep{ID: id, Status: "waiting_approval"}, nil
+}
+
+func (m *mockOrchestratorRepo) GetMessagesByStepID(stepID string) ([]model.AgentMessage, error) {
+	return nil, nil
+}
+
 type mockLLM struct {
 	responses   []string
 	responseIdx int
@@ -555,6 +569,116 @@ func TestStartAgentRun(t *testing.T) {
 			w := httptest.NewRecorder()
 
 			handler.StartAgentRun(w, req)
+
+			if w.Code != tt.expectedStatus {
+				t.Errorf("expected status %d, got %d. Body: %s", tt.expectedStatus, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestResumeAgentRun(t *testing.T) {
+	tests := []struct {
+		name           string
+		id             string
+		setupMock      func() (*mockOrchestratorRepo, *mockAgentRunRepo)
+		useNilOrch     bool
+		expectedStatus int
+	}{
+		{
+			name: "success - paused run",
+			id:   testUUID,
+			setupMock: func() (*mockOrchestratorRepo, *mockAgentRunRepo) {
+				orchRepo := newMockOrchestratorRepo()
+				orchRepo.run = &model.AgentRun{
+					ID:        testUUID,
+					TaskID:    testUUID2,
+					Status:    "paused",
+					Goal:      "Test goal",
+					CreatedAt: time.Now(),
+					UpdatedAt: time.Now(),
+				}
+				runRepo := &mockAgentRunRepo{
+					runs: []model.AgentRun{
+						{
+							ID:        testUUID,
+							TaskID:    testUUID2,
+							Status:    "running",
+							Goal:      "Test goal",
+							CreatedAt: time.Now(),
+							UpdatedAt: time.Now(),
+						},
+					},
+				}
+				return orchRepo, runRepo
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "invalid uuid",
+			id:             "not-a-uuid",
+			setupMock:      func() (*mockOrchestratorRepo, *mockAgentRunRepo) { return newMockOrchestratorRepo(), &mockAgentRunRepo{} },
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "nil orchestrator",
+			id:             testUUID,
+			setupMock:      func() (*mockOrchestratorRepo, *mockAgentRunRepo) { return newMockOrchestratorRepo(), &mockAgentRunRepo{} },
+			useNilOrch:     true,
+			expectedStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "orchestrator error - not paused",
+			id:   testUUID,
+			setupMock: func() (*mockOrchestratorRepo, *mockAgentRunRepo) {
+				orchRepo := newMockOrchestratorRepo()
+				orchRepo.run = &model.AgentRun{
+					ID:        testUUID,
+					TaskID:    testUUID2,
+					Status:    "completed",
+					Goal:      "Test goal",
+					CreatedAt: time.Now(),
+					UpdatedAt: time.Now(),
+				}
+				runRepo := &mockAgentRunRepo{
+					runs: []model.AgentRun{*orchRepo.run},
+				}
+				return orchRepo, runRepo
+			},
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "run not found",
+			id:   testUUID,
+			setupMock: func() (*mockOrchestratorRepo, *mockAgentRunRepo) {
+				orchRepo := newMockOrchestratorRepo()
+				orchRepo.returnErr = sql.ErrNoRows
+				runRepo := &mockAgentRunRepo{
+					getByIDErr: sql.ErrNoRows,
+				}
+				return orchRepo, runRepo
+			},
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orchRepo, runRepo := tt.setupMock()
+
+			var orch *service.Orchestrator
+			if !tt.useNilOrch {
+				fakeLLM := &mockLLM{}
+				orch = service.NewOrchestrator(orchRepo, fakeLLM, tool.ToolOptions{})
+			}
+
+			handler := NewAgentRunHandler(runRepo, orch)
+
+			req := httptest.NewRequest("POST", "/agent-runs/"+tt.id+"/resume", nil)
+			req = mux.SetURLVars(req, map[string]string{"id": tt.id})
+			w := httptest.NewRecorder()
+
+			handler.ResumeAgentRun(w, req)
 
 			if w.Code != tt.expectedStatus {
 				t.Errorf("expected status %d, got %d. Body: %s", tt.expectedStatus, w.Code, w.Body.String())

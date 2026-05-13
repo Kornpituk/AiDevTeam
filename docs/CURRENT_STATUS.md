@@ -78,6 +78,7 @@ human_approvals       - Approval gates (task_id, run_id, step_id, approval_type,
 - `GET /agent-runs/:id` - Get run detail
 - `POST /agent-runs/:id/start` - Start run execution (Phase C)
 - `POST /agent-runs/:id/cancel` - Cancel run execution (Phase C)
+- `POST /agent-runs/:id/resume` - Resume paused run (Phase C.4)
 
 #### Agent Run Steps
 - `POST /agent-runs/:id/steps` - Create step
@@ -166,10 +167,10 @@ components/
   - `LLM_TIMEOUT`: Request timeout (Go duration format, default: `60s`)
 
 #### Dashboard Controls (apps/web/)
-- **Start Run** / **Cancel Run** buttons in run detail page
-- **Polling**: Auto-refreshes run data every 3 seconds while run status is `running`
+- **Start Run** / **Cancel Run** / **Resume Run** buttons in run detail page
+- **Polling**: Auto-refreshes run data every 3 seconds while run status is `running` or `paused`
 - **Refresh Button**: Manual Refresh button in Agent Messages panel
-- **API functions**: `startAgentRun()`, `cancelAgentRun()`
+- **API functions**: `startAgentRun()`, `cancelAgentRun()`, `resumeAgentRun()`
 
 #### Read-Only Tool Execution (Phase C.2.1 - `services/api/internal/tool/`)
 
@@ -202,16 +203,18 @@ components/
 - Multi-turn loop: each LLM call includes full conversation history (system + user + assistant + tool messages)
 - Tool errors do not crash the server
 
-**Tool Approval Gates (Phase C.2.3)**:
-- Configurable via `TOOL_REQUIRE_APPROVAL` env var (comma-separated list of tool names, e.g., `read_file,search_code`)
+**Tool Approval Gates (Phase C.2.3 + C.4)**:
+- Configurable via `TOOL_REQUIRE_APPROVAL` env var (comma-separated list of tool names, e.g., `write_file,bash`)
 - Before executing each tool call, the orchestrator checks if the tool requires approval
 - If approval required:
   - Creates `human_approval` record with `status: pending`, `approval_type: "tool:<name>"`
   - Creates `agent_tool_call` with `status: "recorded"` (not executed)
-  - Feeds back to LLM: "Tool requires human approval. Approval ID: ..."
-  - Does NOT fail the step/run — LLM continues without the tool result
+  - **Pauses the run** (status: `paused`, step: `waiting_approval`)
+  - Exits the goroutine — run is blocked until resumed
+- On resume: auto-resume check finds approved tool call, executes it, feeds result back to LLM
 - If no approval required: tool executes normally (existing behavior)
-- Frontend approvals panel polls every 3s during running state to show auto-created approvals
+- Frontend approvals panel polls every 3s during running or paused state
+- Approve/Reject buttons auto-resume the run
 
 **Native LLM Function Calling (Phase C.2.4)**:
 - Orchestrator now calls `ChatCompletionWithTools()` with registered tool definitions (`list_files`, `read_file`, `search_code`)
@@ -261,15 +264,15 @@ The tool package now has 4 write/execution tools:
 
 ### Latest Verification Status
 
-Last verified after Phase C.3:
+Last verified after Phase C.4 (Pause/Resume):
 
-- **Backend tests**: `go test ./...` → All passing (126 test cases across all packages)
-  - `internal/tool`: 83 tests (was 28 — added 55 new tests for safety, write_file, edit_file, bash, git)
-  - `internal/service`: All passing
-  - `internal/handler`: All passing
+- **Backend tests**: `go test ./...` → All passing (128+ test cases)
+  - `internal/tool`: 83 tests
+  - `internal/service`: All passing (15+ tests including pause/resume)
+  - `internal/handler`: All passing (10+ tests including resume handler)
   - `internal/config`: All passing
   - `internal/server`: All passing
-- **Frontend tests**: `npm run test:run` → 54 tests passing (unchanged)
+- **Frontend tests**: `npm run test:run` → 54 tests passing
 - **Frontend lint**: `npm run lint` → No ESLint warnings or errors
 - **Frontend build**: `npm run build` → Success (9 static pages generated)
 - **Config validation**: `jq empty opencode.json` → Valid JSON
@@ -280,8 +283,7 @@ Last verified after Phase C.3:
 
 ### Not Implemented (Out of Scope for MVP)
 
-- `POST /agent-runs/:id/pause` - Pause execution
-- `POST /agent-runs/:id/resume` - Resume execution
+- `POST /agent-runs/:id/pause` - Pause execution (handled automatically by orchestrator on approval gate)
 
 ### Phase C.3 (Completed)
 
@@ -300,11 +302,6 @@ Last verified after Phase C.3:
 - Execution is in-memory goroutine per run
 - No Redis, RabbitMQ, or external job queue
 - Runs don't survive process restart
-
-#### No Pause/Resume Support
-- The orchestrator does not pause execution to wait for approval
-- If no approval comes before the step completes, the result is stored but not used by the LLM (the next step would see it via previous outputs)
-- Full pause/resume (block execution until approval resolved) is out of scope for MVP
 
 #### No Authentication
 - No user accounts, login, OAuth, JWT, or permission systems
