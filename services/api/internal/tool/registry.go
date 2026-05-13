@@ -22,6 +22,7 @@ type ToolOptions struct {
 	SearchMaxResults  int
 	MaxToolIterations int
 	RequireApproval   []string
+	ToolChoice        string
 }
 
 // RequiresApproval returns true if the given tool name requires human approval before execution.

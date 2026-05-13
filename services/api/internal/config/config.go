@@ -19,6 +19,7 @@ type ToolConfig struct {
 	SearchMaxResults  int
 	MaxToolIterations int
 	RequireApproval   string
+	ToolChoice        string
 }
 
 type DatabaseConfig struct {
@@ -68,6 +69,7 @@ func Load() *Config {
 			SearchMaxResults:  getEnvInt("TOOL_SEARCH_MAX_RESULTS", 50),
 			MaxToolIterations: getEnvInt("TOOL_MAX_ITERATIONS", 10),
 			RequireApproval:   getEnv("TOOL_REQUIRE_APPROVAL", ""),
+			ToolChoice:        getEnv("TOOL_CHOICE", "auto"),
 		},
 	}
 }

@@ -121,12 +121,17 @@ func NewServer(cfg *config.Config) *Server {
 	if cfg.Tool.RequireApproval != "" {
 		requireApproval = strings.Split(cfg.Tool.RequireApproval, ",")
 	}
+	toolChoice := cfg.Tool.ToolChoice
+	if toolChoice == "" {
+		toolChoice = "auto"
+	}
 	toolOpts := tool.ToolOptions{
 		WorkspaceRoot:     workspaceRoot,
 		ReadMaxBytes:      cfg.Tool.ReadMaxBytes,
 		SearchMaxResults:  cfg.Tool.SearchMaxResults,
 		MaxToolIterations: maxIter,
 		RequireApproval:   requireApproval,
+		ToolChoice:        toolChoice,
 	}
 	orchestrator := service.NewOrchestrator(orchestratorRepo, llmProvider, toolOpts)
 

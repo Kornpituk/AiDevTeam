@@ -38,3 +38,11 @@ func (f *FakeProvider) ChatCompletion(ctx context.Context, messages []Message) (
 
 	return response, nil
 }
+
+func (f *FakeProvider) ChatCompletionWithTools(ctx context.Context, messages []Message, tools []ToolDefinition, toolChoice string) (*ChatCompletionResponse, error) {
+	content, err := f.ChatCompletion(ctx, messages)
+	if err != nil {
+		return nil, err
+	}
+	return &ChatCompletionResponse{Content: content}, nil
+}

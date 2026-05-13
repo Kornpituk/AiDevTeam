@@ -152,9 +152,12 @@ components/
   - If task load fails: marks run `failed` with sanitized summary ("Run failed: failed to load task context.")
 
 #### LLM Provider Interface (services/api/internal/llm/)
-- `LLMProvider` interface with `ChatCompletion(ctx, messages)`
-- **FakeProvider**: No API key required, returns deterministic mock responses for demos
-- **OpenAIProvider**: Configurable via environment variables
+- `LLMProvider` interface with:
+  - `ChatCompletion(ctx, messages)` — backward compatible text-only completion
+  - `ChatCompletionWithTools(ctx, messages, tools)` — native function calling with tool definitions
+- `ChatCompletionResponse` — returns both `Content` (text) and `ToolCalls` (native structured)
+- **FakeProvider**: No API key required, returns deterministic mock responses; `ChatCompletionWithTools` delegates to text (backward compat)
+- **OpenAIProvider**: `ChatCompletionWithTools` sends `tools` parameter via OpenAI API; parses native `tool_calls` from response; `ChatCompletion` delegates to `ChatCompletionWithTools` with no tools (no code duplication)
 - **Environment configuration**:
   - `LLM_PROVIDER`: `openai` or `fake` (default: `openai`)
   - `LLM_API_KEY`: Required when `LLM_PROVIDER=openai`
@@ -210,24 +213,34 @@ components/
 - If no approval required: tool executes normally (existing behavior)
 - Frontend approvals panel polls every 3s during running state to show auto-created approvals
 
+**Native LLM Function Calling (Phase C.2.4)**:
+- Orchestrator now calls `ChatCompletionWithTools()` with registered tool definitions (`list_files`, `read_file`, `search_code`)
+- **OpenAIProvider** uses native `tools` API parameter: sends `ToolDefinition` as OpenAI `function` objects, parses `tool_calls` from response
+- **FakeProvider** falls back to text-based tool call parsing (backward compatible)
+- Orchestrator handles two paths:
+  - **Native**: Uses `resp.ToolCalls` directly when LLM returns structured tool calls
+  - **Fallback**: Parses text response with `tool.ParseToolCalls()` for backward compatibility
+- `ToolCall` converted to `tool.ToolCallRequest` before execution, then to `tool.ToolCallResponse` after
+- `ChatCompletion` method remains for backward compatibility (delegates to `ChatCompletionWithTools` with no tools)
+- `tool_choice` parameter configurable via `TOOL_CHOICE` env var (`"none"`, `"auto"`, `"required"`; default: `"auto"`)
+
 **New config env vars**:
 - `WORKSPACE_ROOT` - Project root (defaults to current working directory)
 - `TOOL_READ_MAX_BYTES` - Max bytes to read per file (default: 1048576)
 - `TOOL_SEARCH_MAX_RESULTS` - Max search results (default: 50)
 - `TOOL_MAX_ITERATIONS` - Max tool call iterations per step (default: 10)
 - `TOOL_REQUIRE_APPROVAL` - Comma-separated tool names requiring approval before execution (default: empty)
+- `TOOL_CHOICE` - Tool calling mode: `none`, `auto`, `required` (default: `auto`)
 
 ### Latest Verification Status
 
-Last verified after Phase C.2.3:
+Last verified after Phase C.2.5:
 
 - **Backend tests**: `go test ./...` → All passing
-- **Backend test count**: 394 test cases passing (+3 tool approval gate tests)
-  - Safety/path validation: 12 tests
-  - `read_file`: 8 tests
-  - `list_files`: 5 tests
-  - `search_code`: 5 tests
-  - Orchestrator tool integration: 13 tests (10 multi-turn + 3 approval gate)
+- **Backend test count**: 394 test cases (all existing + refactored for tool_choice)
+  - `ChatCompletionWithTools` passes `toolChoice` to OpenAI `tool_choice` API parameter
+  - Supported values: `"none"`, `"auto"`, `"required"` via `TOOL_CHOICE` env var
+  - FakeProvider ignores `toolChoice` (text parsing fallback)
 - **Frontend tests**: `npm run test:run` → 54 tests passing
 - **Frontend lint**: `npm run lint` → No ESLint warnings or errors
 - **Frontend build**: `npm run build` → Success (9 static pages generated)
@@ -245,8 +258,8 @@ Last verified after Phase C.2.3:
 ### Phase C.2.x (Not Yet Implemented)
 
 - **Write tool execution** (`write_file`, `edit_file`, `bash`, `git`) — explicitly out of scope for Phase C.2.x
-- **Native LLM function calling** — currently parsing JSON from text response; `tool_choice` / function calling not yet wired
 - **Automatic tool execution after approval** — approved tools are not automatically executed; user must re-run if needed
+- **Function-specific `tool_choice`** — only string values supported (`none`/`auto`/`required`); cannot force a specific tool yet
 
 ### Limitations (By Design for MVP)
 

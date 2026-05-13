@@ -230,6 +230,14 @@ func (b *blockingFakeLLM) ChatCompletion(ctx context.Context, messages []llm.Mes
 	}
 }
 
+func (b *blockingFakeLLM) ChatCompletionWithTools(ctx context.Context, messages []llm.Message, tools []llm.ToolDefinition, toolChoice string) (*llm.ChatCompletionResponse, error) {
+	content, err := b.ChatCompletion(ctx, messages)
+	if err != nil {
+		return nil, err
+	}
+	return &llm.ChatCompletionResponse{Content: content}, nil
+}
+
 func (b *blockingFakeLLM) unblock() {
 	close(b.blockChan)
 }
@@ -1100,6 +1108,11 @@ func (c *capturingLLM) ChatCompletion(ctx context.Context, messages []llm.Messag
 	return "captured response", nil
 }
 
+func (c *capturingLLM) ChatCompletionWithTools(ctx context.Context, messages []llm.Message, tools []llm.ToolDefinition, toolChoice string) (*llm.ChatCompletionResponse, error) {
+	c.messages = messages
+	return &llm.ChatCompletionResponse{Content: "captured response"}, nil
+}
+
 func TestExecuteRun_IncludesTaskContextInMessages(t *testing.T) {
 	repo := newMockOrchestratorRepo()
 	repo.run = &model.AgentRun{
@@ -1291,6 +1304,15 @@ func (t *toolResponseLLM) ChatCompletion(ctx context.Context, messages []llm.Mes
 	return resp, nil
 }
 
+func (t *toolResponseLLM) ChatCompletionWithTools(ctx context.Context, messages []llm.Message, tools []llm.ToolDefinition, toolChoice string) (*llm.ChatCompletionResponse, error) {
+	if t.callCount >= len(t.responses) {
+		return &llm.ChatCompletionResponse{Content: "No more responses configured."}, nil
+	}
+	resp := t.responses[t.callCount]
+	t.callCount++
+	return &llm.ChatCompletionResponse{Content: resp}, nil
+}
+
 func TestExecuteRun_ToolCallsCreateAgentToolCallRecords(t *testing.T) {
 	repo := newCaptureMockRepo()
 	repo.run = &model.AgentRun{
@@ -1435,6 +1457,19 @@ func (m *messagesRecorderLLM) ChatCompletion(ctx context.Context, messages []llm
 	resp := m.responses[m.callCount]
 	m.callCount++
 	return resp, nil
+}
+
+func (m *messagesRecorderLLM) ChatCompletionWithTools(ctx context.Context, messages []llm.Message, tools []llm.ToolDefinition, toolChoice string) (*llm.ChatCompletionResponse, error) {
+	msgsCopy := make([]llm.Message, len(messages))
+	copy(msgsCopy, messages)
+	m.allCalls = append(m.allCalls, msgsCopy)
+
+	if m.callCount >= len(m.responses) {
+		return &llm.ChatCompletionResponse{Content: "No more responses configured."}, nil
+	}
+	resp := m.responses[m.callCount]
+	m.callCount++
+	return &llm.ChatCompletionResponse{Content: resp}, nil
 }
 
 func TestExecuteRun_MultiTurnFeedsToolResultsToLLM(t *testing.T) {

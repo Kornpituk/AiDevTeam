@@ -244,14 +244,16 @@ New safe ordering:
 - **C.1.3**: Demo Readiness + Task Context
 - **C.2.1**: Read-Only Tool Execution MVP
 - **C.2.2**: Multi-Turn Tool Feedback Loop
-- **C.2.3**: Tool Approval Gates ✅ (NEW)
+- **C.2.3**: Tool Approval Gates
+- **C.2.4**: Native LLM Function Calling
+- **C.2.5**: `tool_choice` Parameter ✅ (NEW)
 
 **Core Functionality Now Available**:
-- ✅ Start/cancel endpoints (`POST /agent-runs/:id/start`, `POST /agent-runs/:id/cancel`)
-- ✅ Atomic status transitions (prevents concurrent double-starts)
-- ✅ Only pending steps executed (completed/skipped preserved)
+- ✅ Start/cancel endpoints
+- ✅ Atomic status transitions
+- ✅ Only pending steps executed
 - ✅ Existing failed steps fail the run immediately
-- ✅ Context cancellation properly marks as `cancelled` (not `failed`)
+- ✅ Context cancellation properly marks as `cancelled`
 - ✅ Clear terminal summaries
 - ✅ Dashboard polling (every 3s while `running`)
 - ✅ Start/Cancel buttons in UI
@@ -259,6 +261,8 @@ New safe ordering:
 - ✅ Tool calls recorded in `agent_tool_calls` table
 - ✅ Multi-turn tool feedback loop (iterative LLM + tool execution)
 - ✅ Tool approval gates (configurable pre-approval checks per tool)
+- ✅ Native LLM function calling (OpenAI `tools` API, with text fallback)
+- ✅ `tool_choice` parameter (`none`/`auto`/`required` via `TOOL_CHOICE` env var)
 
 **Limitations (Intentional for MVP)**:
 - No WebSocket (polling only)
@@ -541,13 +545,118 @@ for iter := 0; iter < MaxToolIterations; iter++ {
 
 ---
 
-## Latest Verification (After Phase C.2.3)
+### Phase C.2.4: Native LLM Function Calling
+
+**Status**: ✅ Complete
+
+**Goal**: Replace brittle JSON text parsing of tool calls with native OpenAI function calling API (`tools` parameter in chat completions), with backward-compatible text fallback for the FakeProvider.
+
+**What Changed**:
+
+**LLM Interface** (`llm/provider.go`):
+- Added `ToolCall`, `ToolDefinition`, `ChatCompletionResponse` types
+- Added `ChatCompletionWithTools(ctx, messages, tools)` to `LLMProvider` interface
+- `ChatCompletion` remains for backward compatibility
+
+**OpenAI Provider** (`llm/openai.go`):
+- Added `openAITool`, `openAIFunc`, `openAIToolCall`, `openAIFuncCall` types
+- Added `Tools` field to `openAIRequest` (uses `omitempty` so absent when no tools)
+- Added `ToolCalls` field to `openAIMessage`
+- `ChatCompletion` now delegates to `ChatCompletionWithTools` with nil tools (eliminates code duplication)
+- `ChatCompletionWithTools`:
+  - Converts `llm.ToolDefinition` → OpenAI `function` objects with `Type: "function"`
+  - Sends `tools` parameter in request body
+  - Parses `tool_calls` from response into `[]llm.ToolCall`
+  - Returns `*ChatCompletionResponse` with both Content and ToolCalls
+
+**Fake Provider** (`llm/fake.go`):
+- `ChatCompletionWithTools` delegates to `ChatCompletion`, wraps result in `ChatCompletionResponse` (text-only, backward compat)
+
+**Orchestrator** (`service/orchestrator.go`):
+- Replaces `o.llm.ChatCompletion()` with `o.llm.ChatCompletionWithTools(ctx, messages, toolDefs)`
+- Converts `tool.ToolDefinition` → `llm.ToolDefinition` before calling LLM
+- Two tool call paths:
+  1. **Native**: Uses `resp.ToolCalls` directly when LLM returns structured calls
+  2. **Fallback**: Parses `resp.Content` with `tool.ParseToolCalls()` for backward compat
+- Converts `llm.ToolCall` → `tool.ToolCallRequest` before executing
+- Approval gate and normal execution logic unchanged
+
+**Test Updates** (all mocks):
+- Added `ChatCompletionWithTools` to `blockingFakeLLM`, `capturingLLM`, `toolResponseLLM`, `messagesRecorderLLM` (orchestrator tests)
+- Added `ChatCompletionWithTools` to `mockLLM` (handler tests)
+- All 394 tests pass with no behavioral changes
+
+**Files Modified**:
+- `services/api/internal/llm/provider.go` — new types + interface method
+- `services/api/internal/llm/openai.go` — native function calling implementation
+- `services/api/internal/llm/fake.go` — backward-compat wrapper
+- `services/api/internal/service/orchestrator.go` — uses `ChatCompletionWithTools`
+- `services/api/internal/service/orchestrator_test.go` — 4 mock LLM updates
+- `services/api/internal/handler/agent_run_test.go` — mock LLM update
+
+**Key Design Decisions**:
+- No schema/migration changes
+- Backward compatible: `ChatCompletion` still works (OpenAI delegates to `ChatCompletionWithTools` with nil tools)
+- Fallback text parsing ensures FakeProvider continues working
+- No `tool_choice` parameter exposed yet (LLM always receives all tools)
+
+---
+
+### Phase C.2.5: `tool_choice` Parameter
+
+**Status**: ✅ Complete
+
+**Goal**: Make the OpenAI `tool_choice` parameter configurable so users can control whether the LLM must call tools, may call tools, or must not call tools.
+
+**What Changed**:
+
+**Config** (`config/config.go`, `tool/registry.go`):
+- Added `TOOL_CHOICE` env var to `ToolConfig` (default: `"auto"`)
+- Added `ToolChoice string` to `ToolOptions` struct
+
+**LLM Interface** (`llm/provider.go`):
+- Added `toolChoice string` parameter to `ChatCompletionWithTools(ctx, messages, tools, toolChoice)`
+- `ChatCompletion` passes `""` (no tool_choice) to maintain backward compat
+
+**OpenAI Provider** (`llm/openai.go`):
+- Added `ToolChoice any` field to `openAIRequest` with `omitempty`
+- `ChatCompletionWithTools` validates toolChoice: only `"none"`, `"auto"`, `"required"` accepted
+- Sets `reqBody.ToolChoice` when non-empty
+
+**Fake Provider** (`llm/fake.go`):
+- Updated signature; ignores `toolChoice` (text-based tool call parsing continues to work)
+
+**Orchestrator** (`service/orchestrator.go`):
+- Passes `o.toolOpts.ToolChoice` to `ChatCompletionWithTools`
+- Router defaults ToolChoice to `"auto"` if empty
+
+**Test Updates** — Updated 5 mock `ChatCompletionWithTools` signatures
+
+**Files Modified**:
+- `config/config.go` — `TOOL_CHOICE` env var
+- `tool/registry.go` — `ToolChoice` in ToolOptions
+- `llm/provider.go` — interface signature
+- `llm/openai.go` — tool_choice in request
+- `llm/fake.go` — signature update
+- `service/orchestrator.go` — pass toolChoice
+- `server/router.go` — default to "auto"
+- `service/orchestrator_test.go` — 4 mocks
+- `handler/agent_run_test.go` — 1 mock
+
+**Verification**: `go build ./...` ✅, `go test ./...` ✅, 394 tests passing
+
+---
+
+## Latest Verification (After Phase C.2.5)
 
 ### Backend
 - `go test ./...` → All passing
-- 394 test cases (+3 tool approval gate tests)
+- 394 test cases (all existing + refactored for native function calling)
+- LLM interface now has `ChatCompletionWithTools` with native function calling
+- OpenAI provider sends `tools` API parameter, parses `tool_calls` from response
+- FakeProvider falls back to text parsing (backward compatible)
 - Tool package: `internal/tool/` with RequireApproval support
-- Multi-turn loop with approval gates in `internal/service/orchestrator.go`
+- Multi-turn loop with approval gates + native tool calls in `internal/service/orchestrator.go`
 - No new migrations
 
 ### Frontend
@@ -577,6 +686,7 @@ See `docs/CURRENT_STATUS.md` for full list.
 - Default max iterations: 10 (configurable via `TOOL_MAX_ITERATIONS`)
 - Full conversation history preserved in each LLM call
 - Approval gates: configurable per tool via `TOOL_REQUIRE_APPROVAL`
+- Native function calling: OpenAI `tools` API with text fallback
 
 ---
 

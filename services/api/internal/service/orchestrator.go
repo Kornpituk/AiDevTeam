@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -330,7 +329,17 @@ Review Notes: %s
 			default:
 			}
 
-			response, err := o.llm.ChatCompletion(ctx, messages)
+			// Convert tool definitions for LLM
+			toolDefs := make([]llm.ToolDefinition, 0, len(tool.ListTools()))
+			for _, t := range tool.ListTools() {
+				toolDefs = append(toolDefs, llm.ToolDefinition{
+					Name:        t.Name,
+					Description: t.Description,
+					InputSchema: t.InputSchema,
+				})
+			}
+
+			resp, err := o.llm.ChatCompletionWithTools(ctx, messages, toolDefs, o.toolOpts.ToolChoice)
 			if err != nil {
 				if ctx.Err() != nil {
 					_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
@@ -343,31 +352,40 @@ Review Notes: %s
 			}
 
 			// Store assistant message in DB
+			asstContent := resp.Content
 			asstMsg := &model.AgentMessage{
 				RunID:     runID,
 				StepID:    step.ID,
 				ProfileID: step.ProfileID,
 				Role:      "assistant",
-				Content:   response,
+				Content:   asstContent,
 				Metadata:  []byte("{}"),
 			}
 			_ = o.repo.CreateMessage(asstMsg)
 
 			// Add to LLM conversation context
-			messages = append(messages, llm.Message{Role: "assistant", Content: response})
+			messages = append(messages, llm.Message{Role: "assistant", Content: asstContent})
 
-			// Check for tool calls in the response
-			toolCalls, _ := tool.ParseToolCalls(response)
+			// Determine tool calls: native or fallback to text parsing
+			toolCalls := resp.ToolCalls
 			if len(toolCalls) == 0 {
-				// No more tool calls — this is the final response
-				finalResponse = response
+				// Fall back to text parsing for backward compat (e.g., FakeProvider)
+				parsedCalls, _ := tool.ParseToolCalls(resp.Content)
+				for _, pc := range parsedCalls {
+					toolCalls = append(toolCalls, llm.ToolCall{
+						ToolName: pc.ToolName,
+						Input:    pc.Input,
+					})
+				}
+			}
+
+			if len(toolCalls) == 0 {
+				finalResponse = asstContent
 				break
 			}
 
 			// Execute tool calls and record results
 			for _, tc := range toolCalls {
-				inputJSON, _ := json.Marshal(tc.Input)
-
 				if o.toolOpts.RequiresApproval(tc.ToolName) {
 					// --- APPROVAL GATE ---
 					approval := &model.HumanApproval{
@@ -376,7 +394,7 @@ Review Notes: %s
 						ApprovalType:  "tool:" + tc.ToolName,
 						Status:        "pending",
 						RequestedBy:   "system",
-						RequestNotes:  string(inputJSON),
+						RequestNotes:  string(tc.Input),
 					}
 					_ = o.repo.CreateApproval(approval)
 
@@ -384,7 +402,7 @@ Review Notes: %s
 						RunID:    runID,
 						StepID:   step.ID,
 						ToolName: tc.ToolName,
-						Input:    inputJSON,
+						Input:    tc.Input,
 						Status:   "recorded",
 					}
 					_ = o.repo.CreateToolCall(toolCall)
@@ -401,7 +419,11 @@ Review Notes: %s
 					messages = append(messages, llm.Message{Role: "tool", Content: toolResult})
 				} else {
 					// --- NORMAL EXECUTION ---
-					tr := tool.ExecuteToolCall(tc, o.toolOpts)
+					toolReq := tool.ToolCallRequest{
+						ToolName: tc.ToolName,
+						Input:    tc.Input,
+					}
+					tr := tool.ExecuteToolCall(toolReq, o.toolOpts)
 					status := "completed"
 					if !tr.Success {
 						status = "failed"
@@ -411,7 +433,7 @@ Review Notes: %s
 						RunID:    runID,
 						StepID:   step.ID,
 						ToolName: tc.ToolName,
-						Input:    inputJSON,
+						Input:    tc.Input,
 						Output:   outputJSON,
 						Status:   status,
 					}

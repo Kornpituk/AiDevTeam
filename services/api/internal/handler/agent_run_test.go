@@ -437,6 +437,23 @@ func (m *mockLLM) ChatCompletion(ctx context.Context, messages []llm.Message) (s
 	return resp, nil
 }
 
+func (m *mockLLM) ChatCompletionWithTools(ctx context.Context, messages []llm.Message, tools []llm.ToolDefinition, toolChoice string) (*llm.ChatCompletionResponse, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	if m.returnErr != nil {
+		return nil, m.returnErr
+	}
+	if len(m.responses) == 0 {
+		return &llm.ChatCompletionResponse{Content: "fake response"}, nil
+	}
+	resp := m.responses[m.responseIdx%len(m.responses)]
+	m.responseIdx++
+	return &llm.ChatCompletionResponse{Content: resp}, nil
+}
+
 func TestStartAgentRun(t *testing.T) {
 	tests := []struct {
 		name           string

@@ -19,14 +19,39 @@ type OpenAIProvider struct {
 }
 
 type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
+	ToolCalls []openAIToolCall `json:"tool_calls,omitempty"`
+}
+
+type openAITool struct {
+	Type     string     `json:"type"`
+	Function openAIFunc `json:"function"`
+}
+
+type openAIFunc struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Parameters  any    `json:"parameters"`
+}
+
+type openAIToolCall struct {
+	ID       string        `json:"id"`
+	Type     string        `json:"type"`
+	Function openAIFuncCall `json:"function"`
+}
+
+type openAIFuncCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type openAIRequest struct {
 	Model       string          `json:"model"`
 	Messages    []openAIMessage `json:"messages"`
 	Temperature float64         `json:"temperature,omitempty"`
+	Tools       []openAITool    `json:"tools,omitempty"`
+	ToolChoice  any             `json:"tool_choice,omitempty"`
 }
 
 type openAIResponse struct {
@@ -62,8 +87,16 @@ func NewOpenAIProvider(cfg config.LLMConfig) *OpenAIProvider {
 }
 
 func (p *OpenAIProvider) ChatCompletion(ctx context.Context, messages []Message) (string, error) {
+	resp, err := p.ChatCompletionWithTools(ctx, messages, nil, "")
+	if err != nil {
+		return "", err
+	}
+	return resp.Content, nil
+}
+
+func (p *OpenAIProvider) ChatCompletionWithTools(ctx context.Context, messages []Message, tools []ToolDefinition, toolChoice string) (*ChatCompletionResponse, error) {
 	if p.apiKey == "" {
-		return "", fmt.Errorf("LLM_API_KEY not configured")
+		return nil, fmt.Errorf("LLM_API_KEY not configured")
 	}
 
 	openAIMsgs := make([]openAIMessage, len(messages))
@@ -74,20 +107,39 @@ func (p *OpenAIProvider) ChatCompletion(ctx context.Context, messages []Message)
 		}
 	}
 
+	openAITools := make([]openAITool, len(tools))
+	for i, t := range tools {
+		openAITools[i] = openAITool{
+			Type: "function",
+			Function: openAIFunc{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  t.InputSchema,
+			},
+		}
+	}
+
 	reqBody := openAIRequest{
 		Model:       p.model,
 		Messages:    openAIMsgs,
 		Temperature: 0.7,
+		Tools:       openAITools,
+	}
+
+	if toolChoice != "" {
+		if toolChoice == "none" || toolChoice == "auto" || toolChoice == "required" {
+			reqBody.ToolChoice = toolChoice
+		}
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -95,28 +147,45 @@ func (p *OpenAIProvider) ChatCompletion(ctx context.Context, messages []Message)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	var result openAIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	if result.Error != nil {
-		return "", fmt.Errorf("API error: %s", result.Error.Message)
+		return nil, fmt.Errorf("API error: %s", result.Error.Message)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
+		return nil, fmt.Errorf("no choices in response")
 	}
 
-	return result.Choices[0].Message.Content, nil
+	choice := result.Choices[0]
+	chatResp := &ChatCompletionResponse{
+		Content: choice.Message.Content,
+	}
+
+	if len(choice.Message.ToolCalls) > 0 {
+		toolCalls := make([]ToolCall, len(choice.Message.ToolCalls))
+		for i, tc := range choice.Message.ToolCalls {
+			toolCalls[i] = ToolCall{
+				ID:       tc.ID,
+				ToolName: tc.Function.Name,
+				Input:    json.RawMessage(tc.Function.Arguments),
+			}
+		}
+		chatResp.ToolCalls = toolCalls
+	}
+
+	return chatResp, nil
 }
 
 func NewProviderFromConfig(cfg config.LLMConfig) (LLMProvider, error) {
