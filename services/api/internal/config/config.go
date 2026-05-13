@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bufio"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -45,7 +47,52 @@ type LLMConfig struct {
 	Timeout  time.Duration
 }
 
+// loadEnvFile reads a .env file and sets environment variables.
+// This avoids needing an external dependency like godotenv.
+func loadEnvFile(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Parse KEY=VALUE
+		eq := strings.Index(line, "=")
+		if eq < 0 {
+			continue
+		}
+
+		key := strings.TrimSpace(line[:eq])
+		value := strings.TrimSpace(line[eq+1:])
+
+		// Remove surrounding quotes if present
+		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
+			value = value[1 : len(value)-1]
+		}
+
+		// Only set if not already set (OS env vars take precedence)
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
+}
+
 func Load() *Config {
+	// Try to load .env from common locations
+	// 1. Current working directory
+	loadEnvFile(".env")
+	// 2. Project root (relative to services/api/)
+	loadEnvFile("../../.env")
+
 	return &Config{
 		Port: getEnv("PORT", "8080"),
 		Database: DatabaseConfig{
