@@ -424,7 +424,7 @@ Review Notes: %s
 					_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
 					return
 				}
-				_, _ = o.repo.MarkStepFailed(step.ID, "Run failed: error during step execution.")
+				_, _ = o.repo.MarkStepFailed(step.ID, fmt.Sprintf("Run failed: LLM error: %s", err.Error()))
 				_, _ = o.repo.UpdateRunStatus(runID, "failed")
 				return
 			}
