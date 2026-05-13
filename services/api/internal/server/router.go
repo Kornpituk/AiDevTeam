@@ -29,6 +29,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 		allowedOrigins := map[string]bool{
 			"http://localhost:3000": true,
 			"http://localhost:3001": true,
+			"http://localhost:3003": true,
 		}
 		if allowedOrigins[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
