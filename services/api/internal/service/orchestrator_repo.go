@@ -101,3 +101,11 @@ func (r *OrchestratorRepoImpl) UpdateToolCallStatus(id string, status string) (*
 func (r *OrchestratorRepoImpl) CreateApproval(approval *model.HumanApproval) error {
 	return r.approvalRepo.Create(approval)
 }
+
+func (r *OrchestratorRepoImpl) GetApprovedToolApprovals(runID, stepID string) ([]model.HumanApproval, error) {
+	return r.approvalRepo.GetApprovedToolApprovals(runID, stepID)
+}
+
+func (r *OrchestratorRepoImpl) UpdateToolCallOutput(id string, output []byte, status string) (*model.AgentToolCall, error) {
+	return r.toolCallRepo.UpdateOutput(id, output, status)
+}

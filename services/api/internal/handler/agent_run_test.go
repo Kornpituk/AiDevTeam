@@ -413,6 +413,14 @@ func (m *mockOrchestratorRepo) CreateApproval(approval *model.HumanApproval) err
 	return m.returnErr
 }
 
+func (m *mockOrchestratorRepo) GetApprovedToolApprovals(runID, stepID string) ([]model.HumanApproval, error) {
+	return nil, nil
+}
+
+func (m *mockOrchestratorRepo) UpdateToolCallOutput(id string, output []byte, status string) (*model.AgentToolCall, error) {
+	return &model.AgentToolCall{ID: id, Status: status, Output: output}, nil
+}
+
 type mockLLM struct {
 	responses   []string
 	responseIdx int

@@ -132,6 +132,9 @@ func NewServer(cfg *config.Config) *Server {
 		MaxToolIterations: maxIter,
 		RequireApproval:   requireApproval,
 		ToolChoice:        toolChoice,
+		WriteMaxBytes:     cfg.Tool.WriteMaxBytes,
+		BashTimeout:       cfg.Tool.BashTimeout,
+		BashBlocked:       parseBlockedCommands(cfg.Tool.BashBlocked),
 	}
 	orchestrator := service.NewOrchestrator(orchestratorRepo, llmProvider, toolOpts)
 
@@ -222,4 +225,11 @@ func NewServer(cfg *config.Config) *Server {
 
 func (s *Server) Router() *mux.Router {
 	return s.router
+}
+
+func parseBlockedCommands(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
 }

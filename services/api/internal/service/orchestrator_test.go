@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -208,6 +209,14 @@ func (m *mockOrchestratorRepo) UpdateToolCallStatus(id string, status string) (*
 
 func (m *mockOrchestratorRepo) CreateApproval(approval *model.HumanApproval) error {
 	return nil
+}
+
+func (m *mockOrchestratorRepo) GetApprovedToolApprovals(runID, stepID string) ([]model.HumanApproval, error) {
+	return nil, nil
+}
+
+func (m *mockOrchestratorRepo) UpdateToolCallOutput(id string, output []byte, status string) (*model.AgentToolCall, error) {
+	return &model.AgentToolCall{ID: id, Status: status, Output: output}, nil
 }
 
 type blockingFakeLLM struct {
@@ -1255,11 +1264,13 @@ func TestExecuteRun_EmptyTaskIDSkipsTaskContext(t *testing.T) {
 	}
 }
 
-// captureMockRepo records created tool calls and messages for verification
+// captureMockRepo records created tool calls, messages, and approvals for verification
 type captureMockRepo struct {
 	*mockOrchestratorRepo
-	createdToolCalls []*model.AgentToolCall
-	createdMessages  []*model.AgentMessage
+	createdToolCalls     []*model.AgentToolCall
+	createdMessages      []*model.AgentMessage
+	createdApprovals     []*model.HumanApproval
+	toolCallCounter      int
 }
 
 func newCaptureMockRepo() *captureMockRepo {
@@ -1269,6 +1280,8 @@ func newCaptureMockRepo() *captureMockRepo {
 }
 
 func (m *captureMockRepo) CreateToolCall(toolCall *model.AgentToolCall) error {
+	m.toolCallCounter++
+	toolCall.ID = fmt.Sprintf("tc-%d", m.toolCallCounter)
 	m.createdToolCalls = append(m.createdToolCalls, toolCall)
 	return nil
 }
@@ -1279,7 +1292,8 @@ func (m *captureMockRepo) CreateMessage(message *model.AgentMessage) error {
 }
 
 func (m *captureMockRepo) CreateApproval(approval *model.HumanApproval) error {
-	// just return success, we can check via createdToolCalls
+	approval.ID = fmt.Sprintf("approval-%d", len(m.createdApprovals)+1)
+	m.createdApprovals = append(m.createdApprovals, approval)
 	return nil
 }
 
@@ -1693,13 +1707,132 @@ func TestExecuteRun_ToolWithApprovalDoesNotFailRun(t *testing.T) {
 	}
 }
 
-func TestToolRegistry_NoWriteToolsExist(t *testing.T) {
-	writeToolNames := []string{"write_file", "edit_file", "bash", "git", "apply_patch", "delete_file", "rename_file", "create_file", "mkdir", "exec_command"}
+// autoResumeMockRepo extends captureMockRepo to simulate approved approvals appearing
+// after the first iteration (as if a human approved the approval externally).
+type autoResumeMockRepo struct {
+	*captureMockRepo
+	getApprovedCallCount       int
+	updateToolCallOutputCalled bool
+}
+
+func (m *autoResumeMockRepo) GetApprovedToolApprovals(runID, stepID string) ([]model.HumanApproval, error) {
+	m.getApprovedCallCount++
+	// On the second call (and subsequent), return the stored approval with status "approved"
+	// to simulate external approval having been granted between iterations.
+	if m.getApprovedCallCount > 1 && len(m.createdApprovals) > 0 {
+		last := m.createdApprovals[len(m.createdApprovals)-1]
+		appr := *last // shallow copy
+		appr.Status = "approved"
+		return []model.HumanApproval{appr}, nil
+	}
+	return nil, nil
+}
+
+func (m *autoResumeMockRepo) UpdateToolCallOutput(id string, output []byte, status string) (*model.AgentToolCall, error) {
+	m.updateToolCallOutputCalled = true
+	return &model.AgentToolCall{ID: id, Status: status, Output: output}, nil
+}
+
+func TestExecuteRun_AutoResumeExecutesApprovedToolCall(t *testing.T) {
+	capture := newCaptureMockRepo()
+	capture.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	capture.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+
+	// Create auto-resume mock that simulates approvals being granted externally
+	autoResume := &autoResumeMockRepo{
+		captureMockRepo: capture,
+	}
+
+	// LLM: first call returns a tool call, second returns final response
+	llm := newMessagesRecorderLLM(
+		`{"tool_calls":[{"tool_name":"read_file","input":{"path":"test.go"}}]}`,
+		`After reviewing the file, I can proceed with the implementation.`,
+	)
+
+	orch := NewOrchestrator(autoResume, llm, tool.ToolOptions{
+		RequireApproval: []string{"read_file"},
+	})
+	orch.executeRun(context.Background(), testRunID)
+
+	// Run should complete
+	lastStatus := capture.statusHistory[len(capture.statusHistory)-1]
+	if lastStatus != "completed" {
+		t.Errorf("expected run to complete, got %q", lastStatus)
+	}
+
+	// Tool call should have been created
+	if len(capture.createdToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call created, got %d", len(capture.createdToolCalls))
+	}
+
+	// UpdateToolCallOutput should have been called (auto-resume executed the tool)
+	if !autoResume.updateToolCallOutputCalled {
+		t.Error("expected UpdateToolCallOutput to be called by auto-resume")
+	}
+
+	// At least one tool message should exist with the result from auto-resume
+	toolMessages := 0
+	for _, msg := range capture.createdMessages {
+		if msg.Role == "tool" {
+			toolMessages++
+		}
+	}
+	if toolMessages < 1 {
+		t.Errorf("expected at least 1 tool message, got %d", toolMessages)
+	}
+
+	// LLM should have been called twice (tool call round + final round)
+	if len(llm.allCalls) != 2 {
+		t.Fatalf("expected 2 LLM calls, got %d", len(llm.allCalls))
+	}
+
+	// The second LLM call should contain the tool result from auto-resume
+	secondCall := llm.allCalls[1]
+	foundToolResult := false
+	for _, msg := range secondCall {
+		if msg.Role == "tool" && strings.Contains(msg.Content, "read_file") {
+			foundToolResult = true
+			break
+		}
+	}
+	if !foundToolResult {
+		t.Error("expected LLM context in second call to contain tool result with 'read_file'")
+	}
+}
+
+func TestToolRegistry_WriteToolsExist(t *testing.T) {
+	writeToolNames := []string{"write_file", "edit_file", "bash", "git"}
 
 	for _, name := range writeToolNames {
+		tool, err := tool.GetTool(name)
+		if err != nil {
+			t.Errorf("write tool %q should be registered, got error: %v", name, err)
+		}
+		if tool == nil {
+			t.Errorf("tool %q should not be nil", name)
+		}
+	}
+}
+
+func TestToolRegistry_WriteToolsStillBlocked(t *testing.T) {
+	blockedToolNames := []string{"apply_patch", "delete_file", "rename_file", "create_file", "mkdir", "exec_command"}
+
+	for _, name := range blockedToolNames {
 		_, err := tool.GetTool(name)
 		if err == nil {
-			t.Errorf("write tool %q should NOT be registered", name)
+			t.Errorf("tool %q should NOT be registered", name)
 		}
 	}
 }

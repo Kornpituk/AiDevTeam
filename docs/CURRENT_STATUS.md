@@ -1,6 +1,6 @@
 # Current Status
 
-## What Exists Now (as of Phase C.2.2)
+## What Exists Now (as of Phase C.3)
 
 ### Backend Stack
 
@@ -9,7 +9,7 @@
 - **Database**: Postgres via database/sql + lib/pq
 - **Pattern**: Handler → Repository → Model
 - **Configuration**: JSON config + environment variables
-- **Tool Config**: `WORKSPACE_ROOT`, `TOOL_READ_MAX_BYTES` (default 1MB), `TOOL_SEARCH_MAX_RESULTS` (default 50), `TOOL_MAX_ITERATIONS` (default 10)
+- **Tool Config**: `WORKSPACE_ROOT`, `TOOL_READ_MAX_BYTES` (default 1MB), `TOOL_SEARCH_MAX_RESULTS` (default 50), `TOOL_MAX_ITERATIONS` (default 10), `TOOL_WRITE_MAX_BYTES` (default 1MB), `TOOL_BASH_TIMEOUT` (default 30s), `TOOL_BASH_BLOCKED_COMMANDS`, `TOOL_REQUIRE_APPROVAL`, `TOOL_CHOICE`
 
 ### Frontend Stack
 
@@ -231,17 +231,45 @@ components/
 - `TOOL_MAX_ITERATIONS` - Max tool call iterations per step (default: 10)
 - `TOOL_REQUIRE_APPROVAL` - Comma-separated tool names requiring approval before execution (default: empty)
 - `TOOL_CHOICE` - Tool calling mode: `none`, `auto`, `required` (default: `auto`)
+- `TOOL_WRITE_MAX_BYTES` - Max bytes for write/edit files (default: 1048576)
+- `TOOL_BASH_TIMEOUT` - Timeout in seconds for bash commands (default: 30)
+- `TOOL_BASH_BLOCKED_COMMANDS` - Additional comma-separated blocked bash patterns
+
+### Added Phase C.3 Capabilities
+
+#### Write Tool Execution (Phase C.3)
+
+The tool package now has 4 write/execution tools:
+
+| Tool | Input | Output | Safety |
+|------|-------|--------|--------|
+| `write_file` | `{path, content}` | Path, size, type | Binary detection, null byte check, max size, parent dir auto-create, blocked path reject |
+| `edit_file` | `{path, old_string, new_string}` | Path, replaced_count, type | Find-and-replace, binary reject, null byte check, no-match error, blocked path reject |
+| `bash` | `{command, timeout?}` | Stdout, stderr, exit_code | 40 blocked patterns (sudo, dd, mkfs, chown, pipe-to-sh, etc.), timeout, 100KB output limit |
+| `git` | `{args: ["status", "--short"]}` | Stdout, stderr, exit_code | 18 blocked commands (push, reset, clean, rebase, merge, gc, etc.), config write blocks, 60s timeout |
+
+**New files in tool package**:
+- `write_file.go` + `write_file_test.go` (9 tests)
+- `edit_file.go` + `edit_file_test.go` (9 tests)
+- `bash.go` + `bash_test.go` (8 tests)
+- `git.go` + `git_test.go` (10 tests)
+
+**Safety enhancements** (`safety.go`):
+- `ValidateWritePath()` — like `ValidatePath` but allows non-existent files, with anti-symlink-escape walk
+- `IsBashCommandAllowed()` — 40 blocked patterns pipeline
+- `IsGitCommandAllowed()` — 18 blocked git commands + subcommand flag analysis
 
 ### Latest Verification Status
 
-Last verified after Phase C.2.5:
+Last verified after Phase C.3:
 
-- **Backend tests**: `go test ./...` → All passing
-- **Backend test count**: 394 test cases (all existing + refactored for tool_choice)
-  - `ChatCompletionWithTools` passes `toolChoice` to OpenAI `tool_choice` API parameter
-  - Supported values: `"none"`, `"auto"`, `"required"` via `TOOL_CHOICE` env var
-  - FakeProvider ignores `toolChoice` (text parsing fallback)
-- **Frontend tests**: `npm run test:run` → 54 tests passing
+- **Backend tests**: `go test ./...` → All passing (126 test cases across all packages)
+  - `internal/tool`: 83 tests (was 28 — added 55 new tests for safety, write_file, edit_file, bash, git)
+  - `internal/service`: All passing
+  - `internal/handler`: All passing
+  - `internal/config`: All passing
+  - `internal/server`: All passing
+- **Frontend tests**: `npm run test:run` → 54 tests passing (unchanged)
 - **Frontend lint**: `npm run lint` → No ESLint warnings or errors
 - **Frontend build**: `npm run build` → Success (9 static pages generated)
 - **Config validation**: `jq empty opencode.json` → Valid JSON
@@ -255,10 +283,10 @@ Last verified after Phase C.2.5:
 - `POST /agent-runs/:id/pause` - Pause execution
 - `POST /agent-runs/:id/resume` - Resume execution
 
-### Phase C.2.x (Not Yet Implemented)
+### Phase C.3 (Completed)
 
-- **Write tool execution** (`write_file`, `edit_file`, `bash`, `git`) — explicitly out of scope for Phase C.2.x
-- **Automatic tool execution after approval** — approved tools are not automatically executed; user must re-run if needed
+- **Write tool execution** (`write_file`, `edit_file`, `bash`, `git`) — ✅ Implemented with full safety guards
+- **Approval Auto-Resume** — ✅ When a human approves a tool via PATCH, the orchestrator automatically executes the tool and feeds the result into the LLM conversation, without manual re-run
 - **Function-specific `tool_choice`** — only string values supported (`none`/`auto`/`required`); cannot force a specific tool yet
 
 ### Limitations (By Design for MVP)
@@ -272,14 +300,10 @@ Last verified after Phase C.2.5:
 - No Redis, RabbitMQ, or external job queue
 - Runs don't survive process restart
 
-#### No Write/Bash/Git Tool Execution
-- Only read-only tools available: `list_files`, `read_file`, `search_code`
-- No actual modification of files, bash commands, or git operations
-- Multi-turn tool feedback loop allows iterative inspection but not modification
-
-#### No Automatic Codebase Modification by AI
-- All AI execution must be explicitly planned, scoped, and approved
-- Phase C MVP focuses on orchestration, not actual code modification
+#### No Pause/Resume Support
+- The orchestrator does not pause execution to wait for approval
+- If no approval comes before the step completes, the result is stored but not used by the LLM (the next step would see it via previous outputs)
+- Full pause/resume (block execution until approval resolved) is out of scope for MVP
 
 #### No Authentication
 - No user accounts, login, OAuth, JWT, or permission systems

@@ -233,9 +233,9 @@ New safe ordering:
 
 ## Current Status
 
-### Next Step: User Demo / Further Phases
+### Next Step: Further Phases
 
-**Phase C**: Auto Orchestration MVP - Core Complete
+**Phase C**: Auto Orchestration MVP - Core Complete (including write tools)
 
 **Completed Phases in C**:
 - **C.1.1**: Runtime Correctness Fixes
@@ -246,7 +246,9 @@ New safe ordering:
 - **C.2.2**: Multi-Turn Tool Feedback Loop
 - **C.2.3**: Tool Approval Gates
 - **C.2.4**: Native LLM Function Calling
-- **C.2.5**: `tool_choice` Parameter ✅ (NEW)
+- **C.2.5**: `tool_choice` Parameter
+- **C.3**: Write Tool Execution (write_file, edit_file, bash, git) ✅
+- **C.3.1**: Approval Auto-Resume ✅ (NEW)
 
 **Core Functionality Now Available**:
 - ✅ Start/cancel endpoints
@@ -258,17 +260,21 @@ New safe ordering:
 - ✅ Dashboard polling (every 3s while `running`)
 - ✅ Start/Cancel buttons in UI
 - ✅ Read-only tool execution: `list_files`, `read_file`, `search_code`
+- ✅ Write tool execution: `write_file`, `edit_file`, `bash`, `git`
 - ✅ Tool calls recorded in `agent_tool_calls` table
 - ✅ Multi-turn tool feedback loop (iterative LLM + tool execution)
 - ✅ Tool approval gates (configurable pre-approval checks per tool)
 - ✅ Native LLM function calling (OpenAI `tools` API, with text fallback)
 - ✅ `tool_choice` parameter (`none`/`auto`/`required` via `TOOL_CHOICE` env var)
+- ✅ Bash command safety (40 blocked patterns, timeout, output limits)
+- ✅ Git command safety (18 blocked destructive commands)
+- ✅ Write path safety (binary reject, null byte check, size limit, blocked dirs)
+- ✅ Approval auto-resume (approved tools auto-execute and feed results to LLM)
 
 **Limitations (Intentional for MVP)**:
 - No WebSocket (polling only)
 - No distributed queue (in-memory goroutines only)
-- No write/edit/bash/git tool execution
-- No automatic codebase modification
+- No pause/resume (execution doesn't block waiting for approval)
 - No authentication
 
 ---
@@ -647,20 +653,115 @@ for iter := 0; iter < MaxToolIterations; iter++ {
 
 ---
 
-## Latest Verification (After Phase C.2.5)
+### Phase C.3: Write Tool Execution
+
+**Status**: ✅ Complete
+
+**Goal**: Give the orchestration engine "hands" so agent runs can create/edit files, execute bash commands, and run git operations with comprehensive safety guards.
+
+**New Files Created** (8):
+
+| File | Purpose |
+|------|---------|
+| `services/api/internal/tool/write_file.go` | Create/overwrite files with safety: binary extension reject, null byte check, max size limit, parent dir auto-creation |
+| `services/api/internal/tool/edit_file.go` | Find-and-replace in files: validates file exists, rejects binary, null byte check, no-match error, writes back modified content |
+| `services/api/internal/tool/bash.go` | Shell command execution: timeout via context, 100KB output limit, workspace-root cwd, blocked command patterns |
+| `services/api/internal/tool/git.go` | Git command execution: 60s timeout, destructive command blocking, output limits |
+| `services/api/internal/tool/write_file_test.go` | 9 tests: create, overwrite, parent dirs, binary reject, dot-env reject, traversal reject, null bytes, size limit, empty path |
+| `services/api/internal/tool/edit_file_test.go` | 9 tests: replace, multi-replace, no-match error, binary reject, traversal reject, non-existent file, empty path, empty old_string, dot-env reject |
+| `services/api/internal/tool/bash_test.go` | 8 tests: execute echo, timeout, blocked command, workspace dir pwd, empty command, exit code, config-blocked, stderr capture |
+| `services/api/internal/tool/git_test.go` | 10 tests: init, status, push-blocked, reset-blocked, clean-blocked, no-args, rebase-blocked, init+add+status, pull-blocked, merge-blocked |
+
+**Files Modified** (6):
+
+| File | Changes |
+|------|---------|
+| `services/api/internal/tool/safety.go` | Added `ValidateWritePath` (path exists check + anti-symlink-escape walk), `IsBashCommandAllowed` (40 blocked patterns), `IsGitCommandAllowed` (18 blocked commands + flag analysis) |
+| `services/api/internal/tool/safety_test.go` | 22 new tests: 7 for ValidateWritePath, 5 for IsBashCommandAllowed, 14 for IsGitCommandAllowed |
+| `services/api/internal/tool/registry.go` | Added `WriteMaxBytes`, `BashTimeout`, `BashBlocked` to ToolOptions; registered 4 new tool definitions and executor functions |
+| `services/api/internal/config/config.go` | Added `WriteMaxBytes` (env: `TOOL_WRITE_MAX_BYTES`, default 1MB), `BashTimeout` (env: `TOOL_BASH_TIMEOUT`, default 30s), `BashBlocked` (env: `TOOL_BASH_BLOCKED_COMMANDS`) |
+| `services/api/internal/server/router.go` | Passes new config to ToolOptions, added `parseBlockedCommands` helper |
+| `services/api/internal/service/orchestrator_test.go` | Updated `TestToolRegistry_NoWriteToolsExist` → split into write tools exist + other tools still blocked |
+
+**Safety Guards**:
+
+| Domain | Protection |
+|--------|------------|
+| **Write path** | Absolute path reject, `../` traversal reject, `.env`/`.env.*` block, `.git`/`node_modules`/`.next`/`dist`/`build`/`vendor` block, symlink escape detection |
+| **Binary content** | Extension-based reject (39 binary extensions) + null byte content check |
+| **File size** | Configurable max write size via `TOOL_WRITE_MAX_BYTES` (default 1MB) |
+| **Bash commands** | 40 blocked patterns: `sudo`, `su`, `shutdown`, `reboot`, `mkfs`, `fdisk`, `dd if=/of=`, `chown`, `apt`/`yum`/`dnf`/`brew`, redirect to `/dev/`/`/etc/`/`/proc/`/`/sys/`, pipe-to-shell (`| sh`, `| bash`), `curl ... | sh` |
+| **Bash timeout** | Configurable via `TOOL_BASH_TIMEOUT` (default 30s), per-command override via input |
+| **Bash output** | 100KB size limit for both stdout and stderr with truncation markers |
+| **Git commands** | 18 blocked: `push`, `fetch`, `pull`, `rebase`, `clean`, `cherry-pick`, `merge`, `gc`, `prune`, `fsck`, `update-ref`, `reset` (all variants), `submodule update/deinit`, `tag --delete`, `config` writes to sensitive keys |
+| **Git timeout** | Hardcoded 60s timeout |
+| **Config extensibility** | `TOOL_BASH_BLOCKED_COMMANDS` env var for additional custom blocked bash patterns |
+
+**Integration with Existing Orchestration**:
+- Works transparently with the multi-turn tool feedback loop (C.2.2)
+- Works transparently with approval gates (C.2.3) — set `TOOL_REQUIRE_APPROVAL=write_file,edit_file,bash,git` to require approval
+- Works transparently with native LLM function calling (C.2.4)
+- Works transparently with tool_choice parameter (C.2.5)
+- No changes needed to orchestrator logic or data model
+- No new migrations or schema changes
+
+### Approval Auto-Resume (Phase C.3 Enhancement)
+
+**Status**: ✅ Complete
+
+**Goal**: When a human approves a tool call (via `PATCH /human-approvals/:id/status` → `"approved"`), the orchestrator should automatically execute the tool and feed the result into the LLM conversation without requiring manual re-run.
+
+**Design**:
+1. **Migration**: New column `tool_call_id` on `human_approvals` (FK to `agent_tool_calls`) — links each approval to its tool call
+2. **Approval gate creation**: Reordered to create tool_call FIRST, then approval WITH the tool_call ID
+3. **Auto-resume check**: Before each LLM call in the multi-turn loop, check for approved-but-not-executed tool calls
+4. **Execution flow**:
+   - Loop iteration N: LLM calls tool → approval gate → tool_call(recorded) + approval(pending, linked) → "requires approval" message → loop continues
+   - Human approves externally → approval status = "approved"
+   - Loop iteration N+1 (before LLM call): finds approved approval → executes tool → updates tool_call status to "completed" → creates tool message → appends to LLM context → calls LLM with result
+
+**New files**:
+| File | Purpose |
+|------|---------|
+| `db/migrations/000003_approval_tool_link.sql` | Add `tool_call_id` column + indexes |
+
+**Modified files**:
+| File | Changes |
+|------|---------|
+| `model/orchestration.go` | Added `ToolCallID *string` field to `HumanApproval` |
+| `repository/human_approval.go` | Added `tool_call_id` to all SQL queries; new `GetApprovedToolApprovals()` method |
+| `repository/agent_tool_call.go` | Added `UpdateOutput()` method (updates output + status) |
+| `service/orchestrator.go` | Added `GetApprovedToolApprovals`/`UpdateToolCallOutput` to interface; reordered approval gate to link tool_call; added auto-resume check before each LLM call (lines 335-382) |
+| `service/orchestrator_repo.go` | Delegation methods for new interface methods |
+| `service/orchestrator_test.go` | New `autoResumeMockRepo` + `TestExecuteRun_AutoResumeExecutesApprovedToolCall` (verifies: run completes, tool executed, tool message created, LLM context contains result) |
+| `handler/agent_run_test.go` | Mock methods for new interface methods |
+
+**Test Results**:
+- All backend: `go test ./...` → **All passing**
+- Frontend: unaffected (54 tests passing, lint clean, build successful)
+
+---
+
+## Latest Verification (After Phase C.3)
 
 ### Backend
-- `go test ./...` → All passing
-- 394 test cases (all existing + refactored for native function calling)
-- LLM interface now has `ChatCompletionWithTools` with native function calling
-- OpenAI provider sends `tools` API parameter, parses `tool_calls` from response
-- FakeProvider falls back to text parsing (backward compatible)
-- Tool package: `internal/tool/` with RequireApproval support
+- `go test ./...` → All passing (126 test cases across all packages)
+  - `internal/tool`: 83 tests (was 28 — added 55 new tests for write tools + safety)
+  - `internal/service`: All passing
+  - `internal/handler`: All passing
+  - `internal/config`: All passing
+  - `internal/server`: All passing
+- LLM interface: `ChatCompletionWithTools` with native function calling + `tool_choice`
+- OpenAI provider: sends `tools` API parameter, parses `tool_calls`, supports `tool_choice`
+- FakeProvider: text parsing fallback (backward compatible)
+- Tool package: `internal/tool/` with 7 registered tools, RequireApproval support
+- Safety framework: path validation, binary detection, null byte checks, bash blocklist (40 patterns), git blocklist (18 commands), timeouts, output limits
 - Multi-turn loop with approval gates + native tool calls in `internal/service/orchestrator.go`
+- Write tool execution: write_file, edit_file, bash, git
 - No new migrations
 
 ### Frontend
-- `npm run test:run` → 54 tests passing
+- `npm run test:run` → 54 tests passing (unchanged)
 - `npm run lint` → No warnings/errors
 - `npm run build` → Success (9 static pages generated)
 
@@ -676,10 +777,9 @@ See `docs/CURRENT_STATUS.md` for full list.
 - `POST /agent-runs/:id/start` - Start run execution
 - `POST /agent-runs/:id/cancel` - Cancel run execution
 
-### Read-Only Tools Available
-- `list_files` - List directory contents
-- `read_file` - Read text file contents
-- `search_code` - Search code with text or regex
+### All Tools Available (7 total)
+- **Read-only**: `list_files`, `read_file`, `search_code`
+- **Write/Execute**: `write_file`, `edit_file`, `bash`, `git`
 
 ### Multi-Turn Tool Loop
 - Iterative: LLM → tool calls → execute/approve → feed results back → re-query LLM → repeat
@@ -687,6 +787,8 @@ See `docs/CURRENT_STATUS.md` for full list.
 - Full conversation history preserved in each LLM call
 - Approval gates: configurable per tool via `TOOL_REQUIRE_APPROVAL`
 - Native function calling: OpenAI `tools` API with text fallback
+- Write tools: binary rejects, size limits, blocked commands, timeouts
+- **Approval auto-resume**: Approved tool calls are automatically executed and fed back to the LLM
 
 ---
 

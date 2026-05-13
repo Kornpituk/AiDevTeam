@@ -20,6 +20,9 @@ type ToolConfig struct {
 	MaxToolIterations int
 	RequireApproval   string
 	ToolChoice        string
+	WriteMaxBytes     int64
+	BashTimeout       int
+	BashBlocked       string
 }
 
 type DatabaseConfig struct {
@@ -70,6 +73,9 @@ func Load() *Config {
 			MaxToolIterations: getEnvInt("TOOL_MAX_ITERATIONS", 10),
 			RequireApproval:   getEnv("TOOL_REQUIRE_APPROVAL", ""),
 			ToolChoice:        getEnv("TOOL_CHOICE", "auto"),
+			WriteMaxBytes:     getEnvInt64("TOOL_WRITE_MAX_BYTES", 1048576), // 1MB
+			BashTimeout:       getEnvInt("TOOL_BASH_TIMEOUT", 30),
+			BashBlocked:       getEnv("TOOL_BASH_BLOCKED_COMMANDS", ""),
 		},
 	}
 }

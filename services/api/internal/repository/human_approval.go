@@ -15,7 +15,7 @@ func NewHumanApprovalRepository(db *sql.DB) *HumanApprovalRepository {
 }
 
 func (r *HumanApprovalRepository) Create(approval *model.HumanApproval) error {
-	query := `INSERT INTO human_approvals (task_id, run_id, step_id, approval_type, status, requested_by, decided_by, request_notes, decision_notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, created_at`
+	query := `INSERT INTO human_approvals (task_id, run_id, step_id, approval_type, status, requested_by, decided_by, request_notes, decision_notes, tool_call_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, tool_call_id, created_at`
 	var taskID sql.NullString
 	var runID sql.NullString
 	var stepID sql.NullString
@@ -23,6 +23,7 @@ func (r *HumanApprovalRepository) Create(approval *model.HumanApproval) error {
 	var decidedBy sql.NullString
 	var requestNotes sql.NullString
 	var decisionNotes sql.NullString
+	var toolCallID sql.NullString
 	if approval.TaskID == "" {
 		taskID = sql.NullString{Valid: false}
 	} else {
@@ -58,11 +59,16 @@ func (r *HumanApprovalRepository) Create(approval *model.HumanApproval) error {
 	} else {
 		decisionNotes = sql.NullString{String: approval.DecisionNotes, Valid: true}
 	}
-	return r.db.QueryRow(query, taskID, runID, stepID, approval.ApprovalType, approval.Status, requestedBy, decidedBy, requestNotes, decisionNotes).Scan(&approval.ID, &approval.CreatedAt)
+	if approval.ToolCallID == nil || *approval.ToolCallID == "" {
+		toolCallID = sql.NullString{Valid: false}
+	} else {
+		toolCallID = sql.NullString{String: *approval.ToolCallID, Valid: true}
+	}
+	return r.db.QueryRow(query, taskID, runID, stepID, approval.ApprovalType, approval.Status, requestedBy, decidedBy, requestNotes, decisionNotes, toolCallID).Scan(&approval.ID, &toolCallID, &approval.CreatedAt)
 }
 
 func (r *HumanApprovalRepository) GetByRunID(runID string) ([]model.HumanApproval, error) {
-	query := `SELECT id, task_id, run_id, step_id, approval_type, status, requested_by, decided_by, request_notes, decision_notes, created_at, decided_at FROM human_approvals WHERE run_id = $1 ORDER BY created_at DESC`
+	query := `SELECT id, task_id, run_id, step_id, approval_type, status, requested_by, decided_by, request_notes, decision_notes, tool_call_id, created_at, decided_at FROM human_approvals WHERE run_id = $1 ORDER BY created_at DESC`
 	rows, err := r.db.Query(query, runID)
 	if err != nil {
 		return nil, err
@@ -79,8 +85,9 @@ func (r *HumanApprovalRepository) GetByRunID(runID string) ([]model.HumanApprova
 		var decidedBy sql.NullString
 		var requestNotes sql.NullString
 		var decisionNotes sql.NullString
+		var toolCallID sql.NullString
 		var decidedAt sql.NullTime
-		if err := rows.Scan(&approval.ID, &taskID, &runID_, &stepID, &approval.ApprovalType, &approval.Status, &requestedBy, &decidedBy, &requestNotes, &decisionNotes, &approval.CreatedAt, &decidedAt); err != nil {
+		if err := rows.Scan(&approval.ID, &taskID, &runID_, &stepID, &approval.ApprovalType, &approval.Status, &requestedBy, &decidedBy, &requestNotes, &decisionNotes, &toolCallID, &approval.CreatedAt, &decidedAt); err != nil {
 			return nil, err
 		}
 		approval.TaskID = taskID.String
@@ -90,6 +97,10 @@ func (r *HumanApprovalRepository) GetByRunID(runID string) ([]model.HumanApprova
 		approval.DecidedBy = decidedBy.String
 		approval.RequestNotes = requestNotes.String
 		approval.DecisionNotes = decisionNotes.String
+		if toolCallID.Valid {
+			tcID := toolCallID.String
+			approval.ToolCallID = &tcID
+		}
 		if decidedAt.Valid {
 			t := decidedAt.Time
 			approval.DecidedAt = &t
@@ -100,7 +111,7 @@ func (r *HumanApprovalRepository) GetByRunID(runID string) ([]model.HumanApprova
 }
 
 func (r *HumanApprovalRepository) UpdateStatus(id string, status string) (*model.HumanApproval, error) {
-	query := `UPDATE human_approvals SET status = $1, decided_at = NOW() WHERE id = $2 RETURNING id, task_id, run_id, step_id, approval_type, status, requested_by, decided_by, request_notes, decision_notes, created_at, decided_at`
+	query := `UPDATE human_approvals SET status = $1, decided_at = NOW() WHERE id = $2 RETURNING id, task_id, run_id, step_id, approval_type, status, requested_by, decided_by, request_notes, decision_notes, tool_call_id, created_at, decided_at`
 	var approval model.HumanApproval
 	var taskID sql.NullString
 	var runID sql.NullString
@@ -109,8 +120,9 @@ func (r *HumanApprovalRepository) UpdateStatus(id string, status string) (*model
 	var decidedBy sql.NullString
 	var requestNotes sql.NullString
 	var decisionNotes sql.NullString
+	var toolCallID sql.NullString
 	var decidedAt sql.NullTime
-	err := r.db.QueryRow(query, status, id).Scan(&approval.ID, &taskID, &runID, &stepID, &approval.ApprovalType, &approval.Status, &requestedBy, &decidedBy, &requestNotes, &decisionNotes, &approval.CreatedAt, &decidedAt)
+	err := r.db.QueryRow(query, status, id).Scan(&approval.ID, &taskID, &runID, &stepID, &approval.ApprovalType, &approval.Status, &requestedBy, &decidedBy, &requestNotes, &decisionNotes, &toolCallID, &approval.CreatedAt, &decidedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +133,10 @@ func (r *HumanApprovalRepository) UpdateStatus(id string, status string) (*model
 	approval.DecidedBy = decidedBy.String
 	approval.RequestNotes = requestNotes.String
 	approval.DecisionNotes = decisionNotes.String
+	if toolCallID.Valid {
+		tcID := toolCallID.String
+		approval.ToolCallID = &tcID
+	}
 	if decidedAt.Valid {
 		t := decidedAt.Time
 		approval.DecidedAt = &t
@@ -129,7 +145,7 @@ func (r *HumanApprovalRepository) UpdateStatus(id string, status string) (*model
 }
 
 func (r *HumanApprovalRepository) GetByID(id string) (*model.HumanApproval, error) {
-	query := `SELECT id, task_id, run_id, step_id, approval_type, status, requested_by, decided_by, request_notes, decision_notes, created_at, decided_at FROM human_approvals WHERE id = $1`
+	query := `SELECT id, task_id, run_id, step_id, approval_type, status, requested_by, decided_by, request_notes, decision_notes, tool_call_id, created_at, decided_at FROM human_approvals WHERE id = $1`
 	var approval model.HumanApproval
 	var taskID sql.NullString
 	var runID sql.NullString
@@ -138,8 +154,9 @@ func (r *HumanApprovalRepository) GetByID(id string) (*model.HumanApproval, erro
 	var decidedBy sql.NullString
 	var requestNotes sql.NullString
 	var decisionNotes sql.NullString
+	var toolCallID sql.NullString
 	var decidedAt sql.NullTime
-	err := r.db.QueryRow(query, id).Scan(&approval.ID, &taskID, &runID, &stepID, &approval.ApprovalType, &approval.Status, &requestedBy, &decidedBy, &requestNotes, &decisionNotes, &approval.CreatedAt, &decidedAt)
+	err := r.db.QueryRow(query, id).Scan(&approval.ID, &taskID, &runID, &stepID, &approval.ApprovalType, &approval.Status, &requestedBy, &decidedBy, &requestNotes, &decisionNotes, &toolCallID, &approval.CreatedAt, &decidedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -150,9 +167,56 @@ func (r *HumanApprovalRepository) GetByID(id string) (*model.HumanApproval, erro
 	approval.DecidedBy = decidedBy.String
 	approval.RequestNotes = requestNotes.String
 	approval.DecisionNotes = decisionNotes.String
+	if toolCallID.Valid {
+		tcID := toolCallID.String
+		approval.ToolCallID = &tcID
+	}
 	if decidedAt.Valid {
 		t := decidedAt.Time
 		approval.DecidedAt = &t
 	}
 	return &approval, nil
+}
+
+func (r *HumanApprovalRepository) GetApprovedToolApprovals(runID, stepID string) ([]model.HumanApproval, error) {
+	query := `SELECT id, task_id, run_id, step_id, approval_type, status, requested_by, decided_by, request_notes, decision_notes, tool_call_id, created_at, decided_at FROM human_approvals WHERE run_id = $1 AND step_id = $2 AND status = 'approved' AND approval_type LIKE 'tool:%' AND tool_call_id IS NOT NULL ORDER BY created_at ASC`
+	rows, err := r.db.Query(query, runID, stepID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	approvals := make([]model.HumanApproval, 0)
+	for rows.Next() {
+		var approval model.HumanApproval
+		var taskID sql.NullString
+		var runID_ sql.NullString
+		var stepID_ sql.NullString
+		var requestedBy sql.NullString
+		var decidedBy sql.NullString
+		var requestNotes sql.NullString
+		var decisionNotes sql.NullString
+		var toolCallID sql.NullString
+		var decidedAt sql.NullTime
+		if err := rows.Scan(&approval.ID, &taskID, &runID_, &stepID_, &approval.ApprovalType, &approval.Status, &requestedBy, &decidedBy, &requestNotes, &decisionNotes, &toolCallID, &approval.CreatedAt, &decidedAt); err != nil {
+			return nil, err
+		}
+		approval.TaskID = taskID.String
+		approval.RunID = runID_.String
+		approval.StepID = stepID_.String
+		approval.RequestedBy = requestedBy.String
+		approval.DecidedBy = decidedBy.String
+		approval.RequestNotes = requestNotes.String
+		approval.DecisionNotes = decisionNotes.String
+		if toolCallID.Valid {
+			tcID := toolCallID.String
+			approval.ToolCallID = &tcID
+		}
+		if decidedAt.Valid {
+			t := decidedAt.Time
+			approval.DecidedAt = &t
+		}
+		approvals = append(approvals, approval)
+	}
+	return approvals, nil
 }

@@ -94,6 +94,7 @@ type HumanApproval struct {
 	DecidedBy     string     `json:"decided_by"`
 	RequestNotes  string     `json:"request_notes"`
 	DecisionNotes string     `json:"decision_notes"`
+	ToolCallID    *string    `json:"tool_call_id"`
 	CreatedAt     time.Time  `json:"created_at"`
 	DecidedAt     *time.Time `json:"decided_at"`
 }

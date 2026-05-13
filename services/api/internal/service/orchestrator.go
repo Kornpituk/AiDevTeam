@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -27,7 +28,9 @@ type OrchestratorRepository interface {
 	GetTaskByID(taskID string) (*model.Task, error)
 	CreateToolCall(toolCall *model.AgentToolCall) error
 	UpdateToolCallStatus(id string, status string) (*model.AgentToolCall, error)
+	UpdateToolCallOutput(id string, output []byte, status string) (*model.AgentToolCall, error)
 	CreateApproval(approval *model.HumanApproval) error
+	GetApprovedToolApprovals(runID, stepID string) ([]model.HumanApproval, error)
 }
 
 type Orchestrator struct {
@@ -329,6 +332,55 @@ Review Notes: %s
 			default:
 			}
 
+			// === APPROVAL AUTO-RESUME CHECK ===
+			// Before calling LLM, check if any previously gated tool calls have been approved
+			approvedApprovals, err := o.repo.GetApprovedToolApprovals(runID, step.ID)
+			if err == nil && len(approvedApprovals) > 0 {
+				for _, aa := range approvedApprovals {
+					if aa.ToolCallID == nil {
+						continue
+					}
+					toolCallID := *aa.ToolCallID
+
+					// Reconstruct the tool call request from approval's request_notes
+					tcInput := json.RawMessage(aa.RequestNotes)
+
+					// Determine tool name from approval_type (format: "tool:<name>")
+					toolName := strings.TrimPrefix(aa.ApprovalType, "tool:")
+
+					toolReq := tool.ToolCallRequest{
+						ToolName: toolName,
+						Input:    tcInput,
+					}
+					tr := tool.ExecuteToolCall(toolReq, o.toolOpts)
+
+					status := "completed"
+					if !tr.Success {
+						status = "failed"
+					}
+					outputJSON := []byte(tool.FormatToolOutput(tr))
+
+					// Update tool call status and output
+					_, _ = o.repo.UpdateToolCallOutput(toolCallID, outputJSON, status)
+
+					// Create tool message with the result
+					toolResult := tool.FormatToolOutput(tr)
+					toolMsg := &model.AgentMessage{
+						RunID:    runID,
+						StepID:   step.ID,
+						Role:     "tool",
+						Content:  toolResult,
+						Metadata: []byte("{}"),
+					}
+					_ = o.repo.CreateMessage(toolMsg)
+
+					// Append to LLM conversation context so LLM can see the result
+					messages = append(messages, llm.Message{Role: "tool", Content: toolResult})
+				}
+				// After executing approved tools, continue loop to let LLM process the results
+				// (don't call LLM here — the regular flow below will call LLM)
+			}
+
 			// Convert tool definitions for LLM
 			toolDefs := make([]llm.ToolDefinition, 0, len(tool.ListTools()))
 			for _, t := range tool.ListTools() {
@@ -388,16 +440,6 @@ Review Notes: %s
 			for _, tc := range toolCalls {
 				if o.toolOpts.RequiresApproval(tc.ToolName) {
 					// --- APPROVAL GATE ---
-					approval := &model.HumanApproval{
-						RunID:         runID,
-						StepID:        step.ID,
-						ApprovalType:  "tool:" + tc.ToolName,
-						Status:        "pending",
-						RequestedBy:   "system",
-						RequestNotes:  string(tc.Input),
-					}
-					_ = o.repo.CreateApproval(approval)
-
 					toolCall := &model.AgentToolCall{
 						RunID:    runID,
 						StepID:   step.ID,
@@ -406,6 +448,17 @@ Review Notes: %s
 						Status:   "recorded",
 					}
 					_ = o.repo.CreateToolCall(toolCall)
+
+					approval := &model.HumanApproval{
+						RunID:         runID,
+						StepID:        step.ID,
+						ApprovalType:  "tool:" + tc.ToolName,
+						Status:        "pending",
+						RequestedBy:   "system",
+						RequestNotes:  string(tc.Input),
+						ToolCallID:    &toolCall.ID,
+					}
+					_ = o.repo.CreateApproval(approval)
 
 					toolResult := fmt.Sprintf(`{"tool_name":"%s","success":false,"error":"Tool requires human approval. Approval ID: %s"}`, tc.ToolName, approval.ID)
 					toolMsg := &model.AgentMessage{

@@ -89,6 +89,27 @@ func (r *AgentToolCallRepository) UpdateStatus(id string, status string) (*model
 	return &toolCall, nil
 }
 
+func (r *AgentToolCallRepository) UpdateOutput(id string, output []byte, status string) (*model.AgentToolCall, error) {
+	query := `UPDATE agent_tool_calls SET output = $1, status = $2, completed_at = CASE WHEN $2 IN ('completed', 'failed') THEN NOW() ELSE NULL END WHERE id = $3 RETURNING id, run_id, step_id, tool_name, input, output, status, created_at, completed_at`
+	var toolCall model.AgentToolCall
+	var stepID sql.NullString
+	var input []byte
+	var outputScan []byte
+	var completedAt sql.NullTime
+	err := r.db.QueryRow(query, output, status, id).Scan(&toolCall.ID, &toolCall.RunID, &stepID, &toolCall.ToolName, &input, &outputScan, &toolCall.Status, &toolCall.CreatedAt, &completedAt)
+	if err != nil {
+		return nil, err
+	}
+	toolCall.StepID = stepID.String
+	toolCall.Input = input
+	toolCall.Output = outputScan
+	if completedAt.Valid {
+		t := completedAt.Time
+		toolCall.CompletedAt = &t
+	}
+	return &toolCall, nil
+}
+
 func (r *AgentToolCallRepository) GetByID(id string) (*model.AgentToolCall, error) {
 	query := `SELECT id, run_id, step_id, tool_name, input, output, status, created_at, completed_at FROM agent_tool_calls WHERE id = $1`
 	var toolCall model.AgentToolCall
