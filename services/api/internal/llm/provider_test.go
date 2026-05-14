@@ -84,4 +84,37 @@ func TestNewProviderFromConfig_InvalidDefaultsToOpenAI(t *testing.T) {
 	}
 }
 
+func TestFakeProvider_ChatCompletionWithTools_ReturnsError(t *testing.T) {
+	p := NewFakeProvider()
+	p.ReturnError = fmt.Errorf("simulated tool error")
+	_, err := p.ChatCompletionWithTools(context.Background(), []Message{{Role: "user", Content: "hello"}}, nil, "")
+	if err == nil {
+		t.Fatal("expected error but got nil")
+	}
+}
+
+func TestFakeProvider_EmptyResponses(t *testing.T) {
+	p := NewFakeProvider()
+	// Set empty responses list
+	p.Responses = []string{}
+
+	// Should not panic and should return default response
+	resp, err := p.ChatCompletion(context.Background(), []Message{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == "" {
+		t.Fatal("expected non-empty response even with empty responses list")
+	}
+
+	// ChatCompletionWithTools should also work
+	resp2, err := p.ChatCompletionWithTools(context.Background(), []Message{{Role: "user", Content: "hello"}}, nil, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp2.Content == "" {
+		t.Fatal("expected non-empty content even with empty responses list")
+	}
+}
+
 

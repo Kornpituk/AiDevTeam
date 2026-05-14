@@ -123,13 +123,17 @@ func (p *OpenAIProvider) ChatCompletionWithTools(ctx context.Context, messages [
 		Model:       p.model,
 		Messages:    openAIMsgs,
 		Temperature: 0.7,
-		Tools:       openAITools,
 	}
 
 	if toolChoice != "" {
 		if toolChoice == "none" || toolChoice == "auto" || toolChoice == "required" {
 			reqBody.ToolChoice = toolChoice
 		}
+	}
+
+	// Only include tools in the request if toolChoice is not "none"
+	if toolChoice != "none" {
+		reqBody.Tools = openAITools
 	}
 
 	jsonBody, err := json.Marshal(reqBody)

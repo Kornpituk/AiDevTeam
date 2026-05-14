@@ -135,3 +135,30 @@ func TestWriteFile_RejectsEmptyPath(t *testing.T) {
 		t.Error("expected error for empty path")
 	}
 }
+
+func TestWriteFile_BlockedDirDist(t *testing.T) {
+	root := t.TempDir()
+
+	_, err := WriteFile(WriteFileInput{Path: "dist/output.txt", Content: "test"}, root, 1048576)
+	if err == nil {
+		t.Error("expected error for dist directory")
+	}
+}
+
+func TestWriteFile_BlockedDirBuild(t *testing.T) {
+	root := t.TempDir()
+
+	_, err := WriteFile(WriteFileInput{Path: "build/output.txt", Content: "test"}, root, 1048576)
+	if err == nil {
+		t.Error("expected error for build directory")
+	}
+}
+
+func TestWriteFile_BlockedDirVendor(t *testing.T) {
+	root := t.TempDir()
+
+	_, err := WriteFile(WriteFileInput{Path: "vendor/lib/file.txt", Content: "test"}, root, 1048576)
+	if err == nil {
+		t.Error("expected error for vendor directory")
+	}
+}

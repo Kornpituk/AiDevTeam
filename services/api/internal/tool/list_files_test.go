@@ -65,6 +65,31 @@ func TestListFiles_RejectsFilePath(t *testing.T) {
 	}
 }
 
+func TestListFiles_NegativeDepth(t *testing.T) {
+	// Depth <= 0 should be treated as depth 1 (shallow listing)
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "subdir"), 0755)
+	os.WriteFile(filepath.Join(root, "subdir", "deep.txt"), []byte("deep"), 0644)
+
+	// Depth 0
+	result, err := ListFiles(ListFilesInput{Path: ".", Depth: 0}, root)
+	if err != nil {
+		t.Fatalf("unexpected error for depth 0: %v", err)
+	}
+	if result.Total != 1 {
+		t.Errorf("depth 0: expected 1 entry (subdir), got %d", result.Total)
+	}
+
+	// Negative depth (-1)
+	result, err = ListFiles(ListFilesInput{Path: ".", Depth: -1}, root)
+	if err != nil {
+		t.Fatalf("unexpected error for depth -1: %v", err)
+	}
+	if result.Total != 1 {
+		t.Errorf("depth -1: expected 1 entry (subdir), got %d", result.Total)
+	}
+}
+
 func TestListFiles_DepthRecursion(t *testing.T) {
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, "a", "b", "c"), 0755)

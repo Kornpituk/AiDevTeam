@@ -11,6 +11,7 @@ import (
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/llm"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/tool"
+	"github.com/Kornpituk/AiDevTeam/services/api/internal/ws"
 )
 
 type OrchestratorRepository interface {
@@ -42,15 +43,35 @@ type Orchestrator struct {
 	running  map[string]context.CancelFunc
 	mu       sync.Mutex
 	toolOpts tool.ToolOptions
+	hub      *ws.Hub // nil = no broadcasting
 }
 
-func NewOrchestrator(repo OrchestratorRepository, llmProvider llm.LLMProvider, toolOpts tool.ToolOptions) *Orchestrator {
+func NewOrchestrator(repo OrchestratorRepository, llmProvider llm.LLMProvider, toolOpts tool.ToolOptions, hub *ws.Hub) *Orchestrator {
 	return &Orchestrator{
 		repo:     repo,
 		llm:      llmProvider,
 		running:  make(map[string]context.CancelFunc),
 		toolOpts: toolOpts,
+		hub:      hub,
 	}
+}
+
+func (o *Orchestrator) broadcast(roomID string, eventType string, data interface{}) {
+	if o.hub == nil {
+		return
+	}
+	o.hub.BroadcastToRoom(roomID, ws.NewEvent(eventType, data))
+}
+
+func (o *Orchestrator) refreshRunAndBroadcast(runID string) {
+	if o.hub == nil {
+		return
+	}
+	run, err := o.repo.GetRunByID(runID)
+	if err != nil {
+		return
+	}
+	o.broadcast("run:"+runID, ws.TypeRunUpdate, run)
 }
 
 func mapMemberRoleToStepType(role string) string {
@@ -81,6 +102,8 @@ func (o *Orchestrator) StartRun(_ context.Context, runID string) error {
 		return fmt.Errorf("failed to start run: %w", err)
 	}
 
+	o.refreshRunAndBroadcast(runID)
+
 	var executionCtx context.Context
 	var cancel context.CancelFunc
 	executionCtx, cancel = context.WithTimeout(context.Background(), time.Duration(o.toolOpts.RunTimeout)*time.Second)
@@ -110,6 +133,14 @@ func (o *Orchestrator) StartRun(_ context.Context, runID string) error {
 				_, _ = o.repo.UpdateRunStatus(runID, "failed")
 				_, _ = o.repo.UpdateRunSummary(runID, "Run failed: failed to create steps from team.")
 				return fmt.Errorf("failed to create steps from team: %w", err)
+			}
+			// Broadcast newly created steps
+			createdSteps, getErr := o.repo.GetStepsByRunID(runID)
+			if getErr == nil {
+				for _, s := range createdSteps {
+					step := s
+					o.broadcast("run:"+runID, ws.TypeStepUpdate, step)
+				}
 			}
 		}
 	}
@@ -163,6 +194,7 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 			delete(o.running, runID)
 		}
 		o.mu.Unlock()
+		o.refreshRunAndBroadcast(runID)
 	}()
 
 	select {
@@ -231,6 +263,7 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 	if len(failed) > 0 {
 		_, _ = o.repo.UpdateRunStatus(runID, "failed")
 		_, _ = o.repo.UpdateRunSummary(runID, "Run failed: found existing failed step(s). Cannot continue execution.")
+		o.refreshRunAndBroadcast(runID)
 		return
 	}
 
@@ -238,6 +271,7 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 		_, _ = o.repo.UpdateRunStatus(runID, "completed")
 		summary := fmt.Sprintf("Run completed: no pending steps to execute. (Completed: %d, Skipped: %d, Failed: 0)", len(completed), len(skipped))
 		_, _ = o.repo.UpdateRunSummary(runID, summary)
+		o.refreshRunAndBroadcast(runID)
 		return
 	}
 
@@ -256,7 +290,7 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 		default:
 		}
 
-		_, err := o.repo.MarkStepStarted(step.ID)
+		startedStep, err := o.repo.MarkStepStarted(step.ID)
 		if err != nil {
 			if ctx.Err() != nil {
 				_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
@@ -264,7 +298,11 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 				return
 			}
 			_, _ = o.repo.UpdateRunStatus(runID, "failed")
+			o.refreshRunAndBroadcast(runID)
 			return
+		}
+		if startedStep != nil {
+			o.broadcast("run:"+runID, ws.TypeStepUpdate, startedStep)
 		}
 
 		profile, err := o.repo.GetProfileByID(step.ProfileID)
@@ -274,8 +312,12 @@ func (o *Orchestrator) executeRun(ctx context.Context, runID string) {
 				_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
 				return
 			}
-			_, _ = o.repo.MarkStepFailed(step.ID, "Failed to get profile")
+			failedStep, _ := o.repo.MarkStepFailed(step.ID, "Failed to get profile")
+			if failedStep != nil {
+				o.broadcast("run:"+runID, ws.TypeStepUpdate, failedStep)
+			}
 			_, _ = o.repo.UpdateRunStatus(runID, "failed")
+			o.refreshRunAndBroadcast(runID)
 			return
 		}
 
@@ -390,7 +432,10 @@ Review Notes: %s
 					outputJSON := []byte(tool.FormatToolOutput(tr))
 
 					// Update tool call status and output
-					_, _ = o.repo.UpdateToolCallOutput(toolCallID, outputJSON, status)
+					updatedToolCall, _ := o.repo.UpdateToolCallOutput(toolCallID, outputJSON, status)
+					if updatedToolCall != nil {
+						o.broadcast("run:"+runID, ws.TypeToolCallUpdate, updatedToolCall)
+					}
 
 					// Create tool message with the result
 					toolResult := tool.FormatToolOutput(tr)
@@ -402,6 +447,7 @@ Review Notes: %s
 						Metadata: []byte("{}"),
 					}
 					_ = o.repo.CreateMessage(toolMsg)
+					o.broadcast("run:"+runID, ws.TypeMessageNew, toolMsg)
 
 					// Append to LLM conversation context so LLM can see the result
 					messages = append(messages, llm.Message{Role: "tool", Content: toolResult})
@@ -439,8 +485,12 @@ Review Notes: %s
 					_, _ = o.repo.UpdateRunSummary(runID, "Run cancelled.")
 					return
 				}
-				_, _ = o.repo.MarkStepFailed(step.ID, fmt.Sprintf("Run failed: LLM error: %s", err.Error()))
+				failedStep, _ := o.repo.MarkStepFailed(step.ID, fmt.Sprintf("Run failed: LLM error: %s", err.Error()))
+				if failedStep != nil {
+					o.broadcast("run:"+runID, ws.TypeStepUpdate, failedStep)
+				}
 				_, _ = o.repo.UpdateRunStatus(runID, "failed")
+				o.refreshRunAndBroadcast(runID)
 				return
 			}
 
@@ -455,6 +505,7 @@ Review Notes: %s
 				Metadata:  []byte("{}"),
 			}
 			_ = o.repo.CreateMessage(asstMsg)
+			o.broadcast("run:"+runID, ws.TypeMessageNew, asstMsg)
 
 			// Add to LLM conversation context
 			messages = append(messages, llm.Message{Role: "assistant", Content: asstContent})
@@ -480,34 +531,40 @@ Review Notes: %s
 			// Execute tool calls and record results
 			for _, tc := range toolCalls {
 				if o.toolOpts.RequiresApproval(tc.ToolName) {
-					// --- APPROVAL GATE: PAUSE RUN ---
-					toolCall := &model.AgentToolCall{
-						RunID:    runID,
-						StepID:   step.ID,
-						ToolName: tc.ToolName,
-						Input:    tc.Input,
-						Status:   "recorded",
-					}
-					_ = o.repo.CreateToolCall(toolCall)
+				// --- APPROVAL GATE: PAUSE RUN ---
+				toolCall := &model.AgentToolCall{
+					RunID:    runID,
+					StepID:   step.ID,
+					ToolName: tc.ToolName,
+					Input:    tc.Input,
+					Status:   "recorded",
+				}
+				_ = o.repo.CreateToolCall(toolCall)
+				o.broadcast("run:"+runID, ws.TypeToolCallUpdate, toolCall)
 
-					approval := &model.HumanApproval{
-						RunID:         runID,
-						StepID:        step.ID,
-						ApprovalType:  "tool:" + tc.ToolName,
-						Status:        "pending",
-						RequestedBy:   "system",
-						RequestNotes:  string(tc.Input),
-						ToolCallID:    &toolCall.ID,
-					}
-					_ = o.repo.CreateApproval(approval)
+				approval := &model.HumanApproval{
+					RunID:         runID,
+					StepID:        step.ID,
+					ApprovalType:  "tool:" + tc.ToolName,
+					Status:        "pending",
+					RequestedBy:   "system",
+					RequestNotes:  string(tc.Input),
+					ToolCallID:    &toolCall.ID,
+				}
+				_ = o.repo.CreateApproval(approval)
+				o.broadcast("run:"+runID, ws.TypeApprovalUpdate, approval)
 
-					// Mark step as waiting_approval and run as paused, then exit
-					_, _ = o.repo.MarkStepWaitingApproval(step.ID)
-					_, _ = o.repo.UpdateRunStatus(runID, "paused")
-					_, _ = o.repo.UpdateRunSummary(runID, "Run paused: waiting for human approval on tool: "+tc.ToolName)
+				// Mark step as waiting_approval and run as paused, then exit
+				waitingStep, _ := o.repo.MarkStepWaitingApproval(step.ID)
+				if waitingStep != nil {
+					o.broadcast("run:"+runID, ws.TypeStepUpdate, waitingStep)
+				}
+				_, _ = o.repo.UpdateRunStatus(runID, "paused")
+				_, _ = o.repo.UpdateRunSummary(runID, "Run paused: waiting for human approval on tool: "+tc.ToolName)
+				o.refreshRunAndBroadcast(runID)
 
-					// Exit the goroutine - the defer will clean up the running map
-					return
+				// Exit the goroutine - the defer will clean up the running map
+				return
 				} else {
 					// --- NORMAL EXECUTION ---
 					toolReq := tool.ToolCallRequest{
@@ -529,6 +586,7 @@ Review Notes: %s
 						Status:   status,
 					}
 					_ = o.repo.CreateToolCall(toolCall)
+					o.broadcast("run:"+runID, ws.TypeToolCallUpdate, toolCall)
 
 					toolResult := tool.FormatToolOutput(tr)
 					toolMsg := &model.AgentMessage{
@@ -539,6 +597,7 @@ Review Notes: %s
 						Metadata: []byte("{}"),
 					}
 					_ = o.repo.CreateMessage(toolMsg)
+					o.broadcast("run:"+runID, ws.TypeMessageNew, toolMsg)
 
 					// Add tool result to LLM context for next iteration
 					messages = append(messages, llm.Message{Role: "tool", Content: toolResult})
@@ -559,7 +618,7 @@ Review Notes: %s
 		default:
 		}
 
-		_, err = o.repo.MarkStepCompleted(step.ID, finalResponse)
+		completedStep, err := o.repo.MarkStepCompleted(step.ID, finalResponse)
 		if err != nil {
 			if ctx.Err() != nil {
 				_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
@@ -567,7 +626,11 @@ Review Notes: %s
 				return
 			}
 			_, _ = o.repo.UpdateRunStatus(runID, "failed")
+			o.refreshRunAndBroadcast(runID)
 			return
+		}
+		if completedStep != nil {
+			o.broadcast("run:"+runID, ws.TypeStepUpdate, completedStep)
 		}
 
 		stepOutputs = append(stepOutputs, finalResponse)
@@ -585,6 +648,7 @@ Review Notes: %s
 
 	summary := fmt.Sprintf("Run completed successfully. Executed %d steps.", len(pending))
 	_, _ = o.repo.UpdateRunSummary(runID, summary)
+	o.refreshRunAndBroadcast(runID)
 }
 
 func (o *Orchestrator) ResumeRun(ctx context.Context, runID string) error {
@@ -617,6 +681,8 @@ func (o *Orchestrator) ResumeRun(ctx context.Context, runID string) error {
 	o.running[runID] = cancel
 	o.mu.Unlock()
 
+	o.refreshRunAndBroadcast(runID)
+
 	// Start execution goroutine
 	go o.executeRun(execCtx, runID)
 
@@ -645,5 +711,6 @@ func (o *Orchestrator) CancelRun(runID string) error {
 		return fmt.Errorf("failed to update run status to cancelled: %w", err)
 	}
 
+	o.refreshRunAndBroadcast(runID)
 	return nil
 }

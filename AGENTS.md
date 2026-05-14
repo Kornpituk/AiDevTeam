@@ -127,26 +127,48 @@ Frontend panels in run detail:
 - Cleaned up unused imports in AgentRuns components
 - Frontend: 52 tests passing, lint passing, build passing
 
-## Next Phase
+## Completed Phases in C
 
-### Phase C: Auto Orchestration MVP
-
-**DO NOT IMPLEMENT YET unless explicitly requested.**
+### Phase C: Auto Orchestration MVP ✅ COMPLETE
 
 Goal: Enable automatic execution of agent runs.
 
-See `docs/PHASE_C_PLAN.md` for full plan.
+**All sub-phases completed**:
+- **C.1**: Orchestrator Core ✅ — state transitions, step creation from team
+- **C.2**: LLM Provider Interface ✅ — abstraction for LLMs (OpenAI + Fake)
+- **C.3**: Execution Loop ✅ — step execution, multi-turn tool loop, native function calling
+- **C.4**: Dashboard Controls ✅ — start/cancel/resume UI, polling, pause/approve
+- **C.5**: Guardrails and Tests ✅ — +27 backend tests, +79 frontend tests, stress test, edge cases
 
-**Phases in C**:
-- **C.1**: Orchestrator Core - state transitions, step creation from team
-- **C.2**: LLM Provider Interface - abstraction for LLMs
-- **C.3**: Execution Loop - step execution, tool stubs
-- **C.4**: Dashboard Controls - start/cancel UI, polling
-- **C.5**: Guardrails and Tests - safety, test coverage
+**Key endpoints added**:
+- `POST /agent-runs/:id/start` — Start run execution
+- `POST /agent-runs/:id/cancel` — Cancel run execution
+- `POST /agent-runs/:id/resume` — Resume paused run
 
-**Required new endpoints**:
-- `POST /agent-runs/:id/start`
-- `POST /agent-runs/:id/cancel`
+**Total test coverage**:
+- Backend: 116 tests passing across 6 packages
+- Frontend: 133 tests passing, lint clean, build successful
+
+### Phase D.1: WebSocket Real-Time Updates ✅ COMPLETE
+
+Goal: Replace polling with WebSocket push for live updates, with polling fallback.
+
+**Delivered**:
+- `internal/ws/` package — Hub, Client, Handler with room-based broadcast
+- `GET /ws/agent-runs/{id}` — WebSocket upgrade endpoint
+- 16 broadcast points in orchestrator (run, step, message, approval, tool_call updates)
+- Frontend `useWebSocket` hook with auto-reconnect (exponential backoff)
+- Polling kept as fallback when WebSocket disconnects
+- Green "Live" badge indicator
+- Frontend tests: 143 (+10 WebSocket tests), lint clean, build successful
+
+## What's Next
+
+Phase C and D.1 are fully complete. Future work could include:
+- Distributed job queue
+- Authentication/authorization
+- Additional LLM providers (Anthropic, Gemini)
+- Advanced tool implementations
 
 ## Phase 4: Manual Workflow (Legacy/Fallback)
 

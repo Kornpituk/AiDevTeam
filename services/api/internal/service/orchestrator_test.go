@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -309,7 +311,7 @@ func TestStartRun_ValidatesStartableStatuses(t *testing.T) {
 			}
 
 			fakeLLM := llm.NewFakeProvider()
-			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 			err := orch.StartRun(context.Background(), testRunID)
 			if err != nil {
@@ -327,7 +329,7 @@ func TestStartRun_ValidatesStartableStatuses(t *testing.T) {
 			}
 
 			fakeLLM := llm.NewFakeProvider()
-			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 			err := orch.StartRun(context.Background(), testRunID)
 			if err == nil {
@@ -376,7 +378,7 @@ func TestStartRun_CreatesStepsFromTeam(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	err := orch.StartRun(context.Background(), testRunID)
 	if err != nil {
@@ -425,7 +427,7 @@ func TestStartRun_DoesNotCreateDuplicateSteps(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	err := orch.StartRun(context.Background(), testRunID)
 	if err != nil {
@@ -446,7 +448,7 @@ func TestExecuteRun_NoStepsCompletesImmediately(t *testing.T) {
 	repo.steps = []model.AgentRunStep{}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -478,7 +480,7 @@ func TestExecuteRun_CancelledBeforeExecution(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -513,7 +515,7 @@ func TestExecuteRun_CancelledDuringStep(t *testing.T) {
 	}
 
 	blockingLLM := newBlockingFakeLLM()
-	orch := NewOrchestrator(repo, blockingLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, blockingLLM, tool.ToolOptions{}, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -550,7 +552,7 @@ func TestCancelRun_TerminalStatesRejected(t *testing.T) {
 			}
 
 			fakeLLM := llm.NewFakeProvider()
-			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 			err := orch.CancelRun(testRunID)
 			if err == nil {
@@ -572,7 +574,7 @@ func TestCancelRun_NonTerminalCallsCancelAndUpdatesStatus(t *testing.T) {
 			}
 
 			fakeLLM := llm.NewFakeProvider()
-			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 			ctx, cancel := context.WithCancel(context.Background())
 			orch.mu.Lock()
@@ -620,7 +622,7 @@ func TestStartRun_NoStepsCreatedOnFailedTransition(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	err := orch.StartRun(context.Background(), testRunID)
 	if err == nil {
@@ -666,7 +668,7 @@ func TestStartRun_CleansUpOnFailedStepCreation(t *testing.T) {
 	repo.createStepErr = errors.New("db error")
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	err := orch.StartRun(context.Background(), testRunID)
 	if err == nil {
@@ -732,7 +734,7 @@ func TestStartRun_SimulatedConcurrentStart(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	err1 := orch.StartRun(context.Background(), testRunID)
 	if err1 != nil {
@@ -768,7 +770,7 @@ func TestStartRun_HappyPathNoTeam(t *testing.T) {
 	repo.steps = []model.AgentRunStep{}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	err := orch.StartRun(context.Background(), testRunID)
 	if err != nil {
@@ -794,7 +796,7 @@ func TestStartRun_HappyPathNoTeam(t *testing.T) {
 func TestNewOrchestrator_InitializesRunningMap(t *testing.T) {
 	repo := newMockOrchestratorRepo()
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	if orch.running == nil {
 		t.Error("running map should be initialized")
@@ -822,8 +824,8 @@ func TestMultipleRuns_CanRunConcurrently(t *testing.T) {
 
 	fakeLLM := llm.NewFakeProvider()
 	
-	orch1 := NewOrchestrator(repo1, fakeLLM, tool.ToolOptions{})
-	orch2 := NewOrchestrator(repo2, fakeLLM, tool.ToolOptions{})
+	orch1 := NewOrchestrator(repo1, fakeLLM, tool.ToolOptions{}, nil)
+	orch2 := NewOrchestrator(repo2, fakeLLM, tool.ToolOptions{}, nil)
 
 	err1 := orch1.StartRun(context.Background(), testRunID)
 	err2 := orch2.StartRun(context.Background(), testRunID2)
@@ -865,7 +867,7 @@ func TestExecuteRun_CompletedStepsNotRerun(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -909,7 +911,7 @@ func TestExecuteRun_SkippedStepsNotRerun(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -956,7 +958,7 @@ func TestExecuteRun_ExistingFailedStepFailsRun(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -1004,7 +1006,7 @@ func TestExecuteRun_NoPendingStepsCompletes(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -1039,7 +1041,7 @@ func TestExecuteRun_CancelledDuringLLM_MarksCancelled(t *testing.T) {
 	}
 
 	blockingLLM := newBlockingFakeLLM()
-	orch := NewOrchestrator(repo, blockingLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, blockingLLM, tool.ToolOptions{}, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -1074,7 +1076,7 @@ func TestStartRun_AtomicStatusTransition(t *testing.T) {
 		}
 
 		fakeLLM := llm.NewFakeProvider()
-		orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+		orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 		err := orch.StartRun(context.Background(), testRunID)
 		if err == nil {
@@ -1098,7 +1100,7 @@ func TestStartRun_AtomicStatusTransition(t *testing.T) {
 		repo.steps = []model.AgentRunStep{}
 
 		fakeLLM := llm.NewFakeProvider()
-		orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+		orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 		err := orch.StartRun(context.Background(), testRunID)
 		if err != nil {
@@ -1164,7 +1166,7 @@ func TestExecuteRun_IncludesTaskContextInMessages(t *testing.T) {
 	}
 
 	capLLM := &capturingLLM{}
-	orch := NewOrchestrator(repo, capLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, capLLM, tool.ToolOptions{}, nil)
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -1216,7 +1218,7 @@ func TestExecuteRun_TaskLoadFailureFailsRun(t *testing.T) {
 	repo.getTaskErr = errors.New("db error")
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -1253,7 +1255,7 @@ func TestExecuteRun_EmptyTaskIDSkipsTaskContext(t *testing.T) {
 	}
 
 	capLLM := &capturingLLM{}
-	orch := NewOrchestrator(repo, capLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, capLLM, tool.ToolOptions{}, nil)
 
 	orch.executeRun(context.Background(), testRunID)
 
@@ -1364,7 +1366,7 @@ func TestExecuteRun_ToolCallsCreateAgentToolCallRecords(t *testing.T) {
 		`Listed files successfully. Here is the directory structure.`,
 	)
 
-	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{RequireApproval: []string{}})
+	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{RequireApproval: []string{}}, nil)
 	orch.executeRun(context.Background(), testRunID)
 
 	// Verify tool call was created
@@ -1406,7 +1408,7 @@ func TestExecuteRun_ToolResultCreatesToolMessage(t *testing.T) {
 		`Directory listed. Analysis complete.`,
 	)
 
-	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{}, nil)
 	orch.executeRun(context.Background(), testRunID)
 
 	// Verify tool message was created (should have role "tool")
@@ -1444,7 +1446,7 @@ func TestExecuteRun_FailedToolCallDoesNotCrash(t *testing.T) {
 		`Completed processing with some tool errors.`,
 	)
 
-	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{}, nil)
 	orch.executeRun(context.Background(), testRunID)
 
 	// Verify tool call was created with failed status
@@ -1523,7 +1525,7 @@ func TestExecuteRun_MultiTurnFeedsToolResultsToLLM(t *testing.T) {
 		`Based on the directory listing, the project has 3 main directories.`,
 	)
 
-	orch := NewOrchestrator(repo, llm, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, llm, tool.ToolOptions{}, nil)
 	orch.executeRun(context.Background(), testRunID)
 
 	// Verify run completed
@@ -1606,7 +1608,7 @@ func TestExecuteRun_ToolWithApprovalCreatesApprovalRecord(t *testing.T) {
 
 	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{
 		RequireApproval: []string{"read_file"},
-	})
+	}, nil)
 	orch.executeRun(context.Background(), testRunID)
 
 	// Tool call should be "recorded" not "completed"
@@ -1662,7 +1664,7 @@ func TestExecuteRun_ToolWithoutApprovalExecutesNormally(t *testing.T) {
 
 	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{
 		RequireApproval: []string{},
-	})
+	}, nil)
 	orch.executeRun(context.Background(), testRunID)
 
 	// Tool call should be "completed" not "recorded"
@@ -1712,7 +1714,7 @@ func TestExecuteRun_ToolWithApprovalDoesNotFailRun(t *testing.T) {
 
 	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{
 		RequireApproval: []string{"read_file"},
-	})
+	}, nil)
 	orch.executeRun(context.Background(), testRunID)
 
 	// Run should pause (not fail) — approval gate causes pause, not failure
@@ -1778,7 +1780,7 @@ func TestExecuteRun_AutoResumeExecutesApprovedToolCall(t *testing.T) {
 
 	orch := NewOrchestrator(autoResume, recordingLLM, tool.ToolOptions{
 		RequireApproval: []string{"read_file"},
-	})
+	}, nil)
 
 	// ===== STEP 1: First execution — should pause at approval gate =====
 	orch.executeRun(context.Background(), testRunID)
@@ -1870,7 +1872,7 @@ func TestResumeRun_OnlyWorksForPaused(t *testing.T) {
 	}
 
 	fakeLLM := llm.NewFakeProvider()
-	orch := NewOrchestrator(pausedRepo, fakeLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(pausedRepo, fakeLLM, tool.ToolOptions{}, nil)
 
 	err := orch.ResumeRun(context.Background(), testRunID)
 	if err != nil {
@@ -1897,7 +1899,7 @@ func TestResumeRun_FailsForNonPaused(t *testing.T) {
 			}
 
 			fakeLLM := llm.NewFakeProvider()
-			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{})
+			orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
 			err := orch.ResumeRun(context.Background(), testRunID)
 			if err == nil {
 				t.Errorf("ResumeRun should fail for %q status", status)
@@ -2006,7 +2008,7 @@ func TestExecuteRun_StepTimeout_MarksStepFailed(t *testing.T) {
 	blockingLLM := newBlockingFakeLLM()
 	orch := NewOrchestrator(repo, blockingLLM, tool.ToolOptions{
 		StepTimeout: 1, // 1 second timeout per step
-	})
+	}, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -2053,7 +2055,7 @@ func TestExecuteRun_RunTimeout_MarksRunFailed(t *testing.T) {
 	}
 
 	blockingLLM := newBlockingFakeLLM()
-	orch := NewOrchestrator(repo, blockingLLM, tool.ToolOptions{})
+	orch := NewOrchestrator(repo, blockingLLM, tool.ToolOptions{}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -2075,6 +2077,236 @@ func TestExecuteRun_RunTimeout_MarksRunFailed(t *testing.T) {
 	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
 	if lastStatus != "cancelled" {
 		t.Errorf("expected run status 'cancelled', got %q. History: %v", lastStatus, repo.statusHistory)
+	}
+}
+
+func TestExecuteToolCalls_Batch(t *testing.T) {
+	// Batch execution of 2 tool calls directly via tool.ExecuteToolCalls
+	root := t.TempDir()
+	tcs := []tool.ToolCallRequest{
+		{ToolName: "list_files", Input: json.RawMessage(`{"path":"."}`)},
+		{ToolName: "read_file", Input: json.RawMessage(`{"path":"test.txt"}`)},
+	}
+
+	// Create a file to read
+	if err := os.WriteFile(filepath.Join(root, "test.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("cannot create test file: %v", err)
+	}
+
+	opts := tool.ToolOptions{WorkspaceRoot: root}
+	responses := tool.ExecuteToolCalls(tcs, opts)
+
+	if len(responses) != 2 {
+		t.Fatalf("expected 2 responses, got %d", len(responses))
+	}
+
+	// First response: list_files should succeed
+	if !responses[0].Success {
+		t.Errorf("list_files should succeed, got error: %s", responses[0].Error)
+	}
+	if responses[0].ToolName != "list_files" {
+		t.Errorf("expected tool_name 'list_files', got %q", responses[0].ToolName)
+	}
+
+	// Second response: read_file should succeed
+	if !responses[1].Success {
+		t.Errorf("read_file should succeed, got error: %s", responses[1].Error)
+	}
+	if responses[1].ToolName != "read_file" {
+		t.Errorf("expected tool_name 'read_file', got %q", responses[1].ToolName)
+	}
+}
+
+func TestCreateMessageFailure_DoesNotCrash(t *testing.T) {
+	repo := newCaptureMockRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+	repo.createMessageErr = errors.New("db insert failed")
+
+	toolLLM := newToolResponseLLM(
+		`{"tool_calls":[{"tool_name":"list_files","input":{"path":"."}}]}`,
+		`Directory listed. All good.`,
+	)
+
+	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{}, nil)
+	orch.executeRun(context.Background(), testRunID)
+
+	// Run should complete despite CreateMessage errors
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "completed" {
+		t.Errorf("expected run to complete despite CreateMessage errors, last status: %q", lastStatus)
+	}
+}
+
+func TestStartRun_EmptyTeam(t *testing.T) {
+	// Team with ID but 0 members should handle gracefully
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		TeamID: testTeamID,
+		Status: "draft",
+		Goal:   "Test goal",
+	}
+	repo.steps = []model.AgentRunStep{}
+	repo.members = []model.AgentTeamMember{} // empty team
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
+
+	err := orch.StartRun(context.Background(), testRunID)
+	if err != nil {
+		t.Fatalf("StartRun with empty team should succeed: %v", err)
+	}
+
+	// No steps should be created
+	if len(repo.createdSteps) != 0 {
+		t.Errorf("expected 0 steps created for empty team, got %d", len(repo.createdSteps))
+	}
+}
+
+func TestExecuteRun_MultipleApprovalGates(t *testing.T) {
+	// LLM returns 2 tool calls that both require approval.
+	// The orchestrator pauses on the first approval gate, so only the first
+	// tool call/approval record should be created before the goroutine exits.
+	repo := newCaptureMockRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+
+	// LLM returns 2 tool calls
+	toolLLM := newToolResponseLLM(
+		`{"tool_calls":[{"tool_name":"read_file","input":{"path":"a.txt"}},{"tool_name":"search_code","input":{"pattern":"func"}}]}`,
+		`All tools called.`,
+	)
+
+	orch := NewOrchestrator(repo, toolLLM, tool.ToolOptions{
+		RequireApproval: []string{"read_file", "search_code"},
+	}, nil)
+	orch.executeRun(context.Background(), testRunID)
+
+	// Only the first tool call should be processed before the approval gate pauses
+	if len(repo.createdToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call created (first one triggers pause), got %d", len(repo.createdToolCalls))
+	}
+	if repo.createdToolCalls[0].Status != "recorded" {
+		t.Errorf("expected status 'recorded', got %q", repo.createdToolCalls[0].Status)
+	}
+
+	// Only 1 approval should be created (for the first tool)
+	if len(repo.createdApprovals) != 1 {
+		t.Fatalf("expected 1 approval created, got %d", len(repo.createdApprovals))
+	}
+	if repo.createdApprovals[0].ApprovalType != "tool:read_file" {
+		t.Errorf("expected approval type 'tool:read_file', got %q", repo.createdApprovals[0].ApprovalType)
+	}
+
+	// Run should be paused (not completed)
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "paused" {
+		t.Errorf("expected run to be paused, got %q", lastStatus)
+	}
+}
+
+func TestCancelRun_NotInRunningMap(t *testing.T) {
+	// Cancel a run that was never started (not in running map)
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "draft",
+	}
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
+
+	err := orch.CancelRun(testRunID)
+	if err != nil {
+		t.Fatalf("CancelRun should succeed even when run not in running map: %v", err)
+	}
+
+	if repo.run.Status != "cancelled" {
+		t.Errorf("expected status 'cancelled', got %q", repo.run.Status)
+	}
+}
+
+func TestStartRun_ConcurrentStress(t *testing.T) {
+	// Fire 10 goroutines calling StartRun concurrently on the same run.
+	// Only 1 should succeed (atomic transition), others should fail.
+	// Verify only 1 set of steps exists.
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		TeamID: testTeamID,
+		Status: "draft",
+		Goal:   "Test goal",
+	}
+	repo.steps = []model.AgentRunStep{}
+	repo.members = []model.AgentTeamMember{
+		{
+			ID:         "member-1",
+			TeamID:     testTeamID,
+			ProfileID:  testProfileID,
+			MemberRole: "planner",
+			Position:   1,
+		},
+	}
+	repo.profiles[testProfileID] = &model.AgentProfile{
+		ID:           testProfileID,
+		Name:         "Planner Agent",
+		Role:         "planner",
+		SystemPrompt: "You plan things.",
+	}
+
+	fakeLLM := llm.NewFakeProvider()
+	orch := NewOrchestrator(repo, fakeLLM, tool.ToolOptions{}, nil)
+
+	var wg sync.WaitGroup
+	successCount := 0
+	var mu sync.Mutex
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := orch.StartRun(context.Background(), testRunID)
+			if err == nil {
+				mu.Lock()
+				successCount++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if successCount != 1 {
+		t.Errorf("expected exactly 1 successful StartRun, got %d", successCount)
+	}
+
+	// Only 1 set of steps should exist
+	if len(repo.createdSteps) != 1 {
+		t.Errorf("expected exactly 1 step created, got %d", len(repo.createdSteps))
 	}
 }
 

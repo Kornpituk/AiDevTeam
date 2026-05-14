@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   HumanApproval,
   HumanApprovalStatus,
@@ -11,6 +11,7 @@ import {
   resumeAgentRun,
   AgentRunStep,
 } from '@/lib/api'
+import { useWebSocket } from '@/lib/hooks/useWebSocket'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ApprovalStatusSelector } from './ApprovalStatusSelector'
@@ -58,6 +59,35 @@ export function HumanApprovalsPanel({ runId, steps, runStatus }: HumanApprovalsP
   const [actionTarget, setActionTarget] = useState<HumanApprovalStatus | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
+  const shouldConnectWs =
+    runStatus === 'running' || runStatus === 'paused'
+
+  const handleWsMessage = useCallback((msg: { type: string; data: any }) => {
+    switch (msg.type) {
+      case 'approval_update':
+        setApprovals((prev) => {
+          const idx = prev.findIndex((a) => a.id === msg.data.id)
+          if (idx >= 0) {
+            const updated = [...prev]
+            updated[idx] = { ...updated[idx], ...msg.data }
+            return updated
+          }
+          return [...prev, msg.data]
+        })
+        break
+      case 'tool_call_update': {
+        const tc = msg.data as AgentToolCall
+        setToolCallMap((prev) => ({ ...prev, [tc.id]: tc }))
+        break
+      }
+    }
+  }, [])
+
+  const { isConnected: wsConnected } = useWebSocket({
+    runId: shouldConnectWs ? runId : null,
+    onMessage: handleWsMessage,
+  })
+
   useEffect(() => {
     async function fetchData() {
       try {
@@ -81,8 +111,9 @@ export function HumanApprovalsPanel({ runId, steps, runStatus }: HumanApprovalsP
     fetchData()
   }, [runId])
 
-  // Poll for new approvals while run is running
+  // Poll for new approvals while run is running (fallback when WebSocket is disconnected)
   useEffect(() => {
+    if (wsConnected) return
     if (runStatus !== 'running' && runStatus !== 'paused') return
 
     const intervalId = setInterval(async () => {
@@ -103,7 +134,7 @@ export function HumanApprovalsPanel({ runId, steps, runStatus }: HumanApprovalsP
     }, 3000)
 
     return () => clearInterval(intervalId)
-  }, [runId, runStatus])
+  }, [runId, runStatus, wsConnected])
 
   function handleApprovalAdded(approval: HumanApproval) {
     setApprovals((prev) => [...prev, approval])

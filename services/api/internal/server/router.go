@@ -14,6 +14,7 @@ import (
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/repository"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/service"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/tool"
+	"github.com/Kornpituk/AiDevTeam/services/api/internal/ws"
 	_ "github.com/lib/pq"
 )
 
@@ -139,7 +140,9 @@ func NewServer(cfg *config.Config) *Server {
 		StepTimeout:       int(cfg.Tool.StepTimeout.Seconds()),
 		RunTimeout:        int(cfg.Tool.RunTimeout.Seconds()),
 	}
-	orchestrator := service.NewOrchestrator(orchestratorRepo, llmProvider, toolOpts)
+	wsHub := ws.NewHub()
+
+	orchestrator := service.NewOrchestrator(orchestratorRepo, llmProvider, toolOpts, wsHub)
 
 	taskHandler := handler.NewTaskHandler(taskRepo)
 	eventHandler := handler.NewEventHandler(eventRepo)
@@ -219,6 +222,11 @@ func NewServer(cfg *config.Config) *Server {
 	router.HandleFunc("/agent-runs/{id}/tool-calls", toolCallHandler.CreateToolCall).Methods("POST")
 	router.HandleFunc("/agent-runs/{id}/tool-calls", toolCallHandler.GetToolCalls).Methods("GET")
 	router.HandleFunc("/agent-tool-calls/{id}/status", toolCallHandler.UpdateToolCallStatus).Methods("PATCH")
+
+	// WebSocket for real-time updates
+	router.HandleFunc("/ws/agent-runs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		ws.ServeWS(wsHub, w, r)
+	})
 
 	return &Server{
 		cfg:    cfg,

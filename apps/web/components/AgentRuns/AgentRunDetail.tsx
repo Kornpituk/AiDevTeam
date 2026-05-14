@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import {
   AgentRun,
@@ -25,6 +25,7 @@ import { AgentMessagesPanel } from './AgentMessagesPanel'
 import { HumanApprovalsPanel } from './HumanApprovalsPanel'
 import { ToolCallsPanel } from './ToolCallsPanel'
 import { formatDate } from '@/lib/utils'
+import { useWebSocket } from '@/lib/hooks/useWebSocket'
 
 interface AgentRunDetailProps {
   runId: string
@@ -39,6 +40,27 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
   const [showAddStep, setShowAddStep] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<'start' | 'cancel' | 'resume' | null>(null)
+
+  const shouldConnectWs =
+    run?.status === 'running' || run?.status === 'paused'
+
+  const handleWsMessage = useCallback((msg: { type: string; data: any }) => {
+    switch (msg.type) {
+      case 'run_update':
+        setRun(msg.data)
+        break
+      case 'step_update':
+        setSteps((prev) =>
+          prev.map((s) => (s.id === msg.data.id ? { ...s, ...msg.data } : s))
+        )
+        break
+    }
+  }, [])
+
+  const { isConnected: wsConnected } = useWebSocket({
+    runId: shouldConnectWs ? runId : null,
+    onMessage: handleWsMessage,
+  })
 
   useEffect(() => {
     async function fetchInitialData() {
@@ -69,7 +91,10 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
     fetchInitialData()
   }, [runId])
 
+  // Fallback polling: only runs when WebSocket is NOT connected
+  // and status is running/paused
   useEffect(() => {
+    if (wsConnected) return
     if (run?.status !== 'running' && run?.status !== 'paused') {
       return
     }
@@ -96,7 +121,7 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
         clearInterval(intervalId)
       }
     }
-  }, [runId, run?.status])
+  }, [runId, run?.status, wsConnected])
 
   async function handleStartRun() {
     if (!run) return
@@ -212,6 +237,12 @@ export function AgentRunDetail({ runId }: AgentRunDetailProps) {
               <div>
                 <div className="flex items-center gap-3 mb-2">
                   <RunStatusBadge status={run.status} />
+                  {wsConnected && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-600 animate-pulse" />
+                      Live
+                    </span>
+                  )}
                   <span className="text-sm text-slate-500">
                     Run ID: {run.id}
                   </span>

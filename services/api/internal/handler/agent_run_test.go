@@ -559,7 +559,7 @@ func TestStartAgentRun(t *testing.T) {
 			var orch *service.Orchestrator
 			if !tt.useNilOrch {
 				fakeLLM := &mockLLM{}
-				orch = service.NewOrchestrator(orchRepo, fakeLLM, tool.ToolOptions{})
+				orch = service.NewOrchestrator(orchRepo, fakeLLM, tool.ToolOptions{}, nil)
 			}
 
 			handler := NewAgentRunHandler(runRepo, orch)
@@ -669,7 +669,7 @@ func TestResumeAgentRun(t *testing.T) {
 			var orch *service.Orchestrator
 			if !tt.useNilOrch {
 				fakeLLM := &mockLLM{}
-				orch = service.NewOrchestrator(orchRepo, fakeLLM, tool.ToolOptions{})
+				orch = service.NewOrchestrator(orchRepo, fakeLLM, tool.ToolOptions{}, nil)
 			}
 
 			handler := NewAgentRunHandler(runRepo, orch)
@@ -766,7 +766,7 @@ func TestCancelAgentRun(t *testing.T) {
 			var orch *service.Orchestrator
 			if !tt.useNilOrch {
 				fakeLLM := &mockLLM{}
-				orch = service.NewOrchestrator(orchRepo, fakeLLM, tool.ToolOptions{})
+				orch = service.NewOrchestrator(orchRepo, fakeLLM, tool.ToolOptions{}, nil)
 			}
 
 			handler := NewAgentRunHandler(runRepo, orch)

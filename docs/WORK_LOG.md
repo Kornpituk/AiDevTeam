@@ -233,24 +233,12 @@ New safe ordering:
 
 ## Current Status
 
-### Next Step: Further Phases
+### WebSocket Real-Time Updates ✅
 
-**Phase C**: Auto Orchestration MVP - Core Complete (including Pause/Resume)
+**Phase D.1**: WebSocket Real-Time Updates — **COMPLETE**
 
-**Completed Phases in C**:
-- **C.1.1**: Runtime Correctness Fixes
-- **C.1.2**: Orchestration Hardening
-- **C.1.2.1**: Concurrent Start Ordering Fix
-- **C.1.3**: Demo Readiness + Task Context
-- **C.2.1**: Read-Only Tool Execution MVP
-- **C.2.2**: Multi-Turn Tool Feedback Loop
-- **C.2.3**: Tool Approval Gates
-- **C.2.4**: Native LLM Function Calling
-- **C.2.5**: `tool_choice` Parameter
-- **C.3**: Write Tool Execution (write_file, edit_file, bash, git) ✅
-- **C.3.1**: Approval Auto-Resume ✅
-- **C.3.2**: Approvals Dashboard ✅
-- **C.4**: Pause/Resume ✅ (NEW)
+**Completed**:
+- **D.1**: WebSocket Real-Time Updates ✅ **NEW**
 
 **Core Functionality Now Available**:
 - ✅ Start/cancel/resume endpoints
@@ -259,7 +247,9 @@ New safe ordering:
 - ✅ Existing failed steps fail the run immediately
 - ✅ Context cancellation properly marks as `cancelled`
 - ✅ Clear terminal summaries
-- ✅ Dashboard polling (every 3s while `running` or `paused`)
+- ✅ **WebSocket real-time updates** (push, not polling)
+- ✅ **Polling fallback** (when WebSocket disconnects)
+- ✅ **Live indicator** (green "Live" badge)
 - ✅ Start/Cancel/Resume buttons in UI
 - ✅ Read-only tool execution: `list_files`, `read_file`, `search_code`
 - ✅ Write tool execution: `write_file`, `edit_file`, `bash`, `git`
@@ -273,10 +263,11 @@ New safe ordering:
 - ✅ Git command safety (18 blocked destructive commands)
 - ✅ Write path safety (binary reject, null byte check, size limit, blocked dirs)
 - ✅ Approval auto-resume (approved tools auto-execute and feed results to LLM)
-- ✅ Approvals Dashboard (approve/reject buttons, tool input/output display, auto-refresh, auto-resume)
+- ✅ Approvals Dashboard (approve/reject buttons, tool input/output display, auto-refresh via WebSocket)
+- ✅ **Test coverage**: 116 backend tests, 143 frontend tests (+10 WebSocket tests), stress test, edge cases
+- ✅ **WebSocket endpoint**: `GET /ws/agent-runs/{id}` with room-based broadcast
 
 **Limitations (Intentional for MVP)**:
-- No WebSocket (polling only)
 - No distributed queue (in-memory goroutines only)
 - No authentication
 
@@ -828,34 +819,138 @@ for iter := 0; iter < MaxToolIterations; iter++ {
 - Frontend: `npm run lint` → No warnings/errors
 - Frontend: `npm run build` → Success
 
+### Phase C.5: Guardrails and Tests
+
+**Status**: ✅ Complete
+
+**Goal**: Add comprehensive test coverage for edge cases, integration scenarios, stress conditions, and frontend component behaviors.
+
+**What Changed — Backend** (+27 new test functions):
+
+| Package | Before | After | New Tests |
+|---------|--------|-------|-----------|
+| `internal/config` | 4 tests | 11 tests | `TestGetEnvInt`, `TestGetEnvInt64`, `TestGetEnvDuration`, `TestLoadEnvFile`, `TestLoad_LLMDefaults`, `TestLoad_ToolDefaults` |
+| `internal/llm` | 8 tests | 10 tests | `TestOpenAIProvider_ChatCompletionWithTools_ToolChoiceNone`, `_ToolChoiceRequired`, `_MultipleToolCalls`, `_ContextCancellation`, `_ZeroChoices`, `TestFakeProvider_ChatCompletionWithTools_ReturnsError`, `TestFakeProvider_EmptyResponses` |
+| `internal/service` | 29 tests | 35 tests | `TestExecuteToolCalls_Batch`, `TestCreateMessageFailure_DoesNotCrash`, `TestStartRun_EmptyTeam`, `TestExecuteRun_MultipleApprovalGates`, `TestCancelRun_NotInRunningMap`, `TestStartRun_ConcurrentStress` (10 goroutines) |
+| `internal/tool` | 37 tests | 47 tests | `TestExecuteToolCalls_Batch`, `TestFormatToolOutput_MarshalError`, `TestIsGitCommandAllowed_CherryPickBlocked`, `TestIsBashCommandAllowed_PipeToShBlocked`, `TestValidatePath_EmptyWorkspaceRoot`, `TestListFiles_NegativeDepth`, `TestWriteFile_BlockedDirDist`, `TestWriteFile_BlockedDirBuild`, `TestWriteFile_BlockedDirVendor` |
+
+**Production code fix** (`internal/llm/openai.go`):
+- When `toolChoice="none"`, the `tools` field is now omitted from the OpenAI request body (semantically correct). Previously tools were always sent.
+
+**What Changed — Frontend** (+79 new tests):
+
+| File | Tests | Coverage |
+|------|-------|----------|
+| `lib/api.test.ts` | +8 (38 total) | `resumeAgentRun` happy/404/network, start/cancel 404, updateHumanApprovalStatus approved/rejected/404 |
+| `components/AgentRuns/AgentRunBadges.test.ts` | 30 (new) | All format/variant functions for all 9 run statuses, 7 step statuses, 4 approval statuses, 5 tool call statuses, 5 message roles |
+| `components/AgentRuns/AgentRunDetail.test.tsx` | 22 (new) | Loading state, 6 button visibility scenarios (draft/running/paused/completed/failed/cancelled), 4 action loading labels, 3 error handling scenarios, runStatus prop passing, 4 polling behaviors (running/paused/paused stops/unmount cleanup) |
+| `components/AgentRuns/HumanApprovalsPanel.test.tsx` | 19 (new) | Loading/empty states, approve/reject button visibility, badge display for non-pending, approve/reject click actions, button loading text, error banner, auto-resume on pause, tool input JSON display, tool result display, 4 polling behaviors |
+
+**New MSW handlers** (`lib/mocks/handlers.ts`):
+- `POST /agent-runs/:id/resume` — resume handler
+- `POST /agent-runs/:id/start` — 404 error handler
+- `POST /agent-runs/:id/cancel` — 404 error handler
+- `PATCH /human-approvals/:id/status` — dedicated approval status handler
+
 ---
 
-## Latest Verification (After Phase C.4)
+### Phase D.1: WebSocket Real-Time Updates
+
+**Status**: ✅ Complete
+
+**Goal**: Replace polling with WebSocket push for real-time run/step/message/approval/tool_call updates, with polling as fallback.
+
+**What Changed — Backend:**
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `internal/ws/hub.go` | **Created** | Room-based broadcast hub: register/unregister clients, broadcast messages per room |
+| `internal/ws/client.go` | **Created** | WebSocket connection manager with ReadPump (ping/pong) and WritePump (message delivery) |
+| `internal/ws/handler.go` | **Created** | HTTP→WebSocket upgrade handler, extracts run ID from URL, creates client in room `run:{id}` |
+| `internal/ws/types.go` | **Created** | Message types: `run_update`, `step_update`, `message_new`, `approval_update`, `tool_call_update`, helper `NewEvent()` |
+| `internal/server/router.go` | **Modified** | Creates `wsHub`, wires route `GET /ws/agent-runs/{id}`, passes hub to orchestrator |
+| `internal/service/orchestrator.go` | **Modified** | Added `hub *ws.Hub` field, `broadcast()` helper, `refreshRunAndBroadcast()`; 16 broadcast points across StartRun/executeRun/CancelRun/ResumeRun |
+| `go.mod` / `go.sum` | **Modified** | Added `github.com/gorilla/websocket v1.5.3` |
+
+**Broadcast points in orchestrator (16 total):**
+- `StartRun`: after status transition to running
+- `executeRun`: after run status changes (completed/failed/cancelled)
+- `executeRun`: after step status changes (started, completed, failed, waiting_approval)
+- `executeRun`: after new message created (assistant response, tool results)
+- `executeRun`: after tool call created/updated (approval gate, auto-resume)
+- `executeRun`: after approval created (approval gate)
+- `CancelRun`: after status change to cancelled
+- `ResumeRun`: after status change back to running
+
+**What Changed — Frontend:**
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `lib/hooks/useWebSocket.ts` | **Created** | Custom hook: auto-connect, auto-reconnect with exponential backoff (1s→30s max), refs for stale-closure safety |
+| `components/AgentRuns/AgentRunDetail.tsx` | **Modified** | Uses `useWebSocket` for `run_update`/`step_update`; adds green "Live" badge; polling only runs when WS disconnected |
+| `components/AgentRuns/HumanApprovalsPanel.tsx` | **Modified** | Uses `useWebSocket` for `approval_update`/`tool_call_update`; polling only runs when WS disconnected |
+| `components/AgentRuns/AgentRunDetail.test.tsx` | **Modified** | +6 WebSocket tests: Live badge, connect/disconnect, polling fallback |
+| `components/AgentRuns/HumanApprovalsPanel.test.tsx` | **Modified** | +4 WebSocket tests: connect/disconnect, polling fallback |
+
+**WebSocket Architecture:**
+```
+Frontend (useWebSocket hook)                Backend (ws.Hub)
+       │                                         │
+       │  ws://localhost:8080/ws/agent-runs/{id}  │
+       │════════════════════════════════════════>│
+       │                                         │  ┌─────────────┐
+       │  {"type":"run_update","data":{...}}     │  │ Orchestrator│
+       │<════════════════════════════════════════│  │ broadcasts  │
+       │  {"type":"step_update","data":{...}}    │  │ at 16 points │
+       │<════════════════════════════════════════│  └─────────────┘
+       │  {"type":"approval_update","data":{...}}│
+       │<════════════════════════════════════════│
+       │                                         │
+       │  (Polling fallback when WS disconnects) │
+```
+
+**Key Design Decisions:**
+1. **Polling as fallback, not removed** — when WebSocket disconnects, 3s polling kicks in automatically
+2. **Per-component subscriptions** — AgentRunDetail handles run/step updates; HumanApprovalsPanel handles approval/tool_call updates independently
+3. **Exponential backoff reconnect** — 1s → 2s → 4s → 8s → 16s → 30s max (avoids reconnect storm)
+4. **gorilla/websocket** — same author as gorilla/mux, proven production WebSocket library
+5. **Room-based routing** — each run gets room `run:{id}`, only relevant clients receive updates
+
+---
+
+## Latest Verification (After WebSocket)
 
 ### Backend
-- `go test ./...` → All passing (128+ test cases across all packages)
-  - `internal/tool`: 83 tests
-  - `internal/service`: All passing (15+ tests including pause/resume)
-  - `internal/handler`: All passing (10+ tests including resume handler)
-  - `internal/config`: All passing
-  - `internal/server`: All passing
-- LLM interface: `ChatCompletionWithTools` with native function calling + `tool_choice`
-- OpenAI provider: sends `tools` API parameter, parses `tool_calls`, supports `tool_choice`
-- FakeProvider: text parsing fallback (backward compatible)
-- Tool package: `internal/tool/` with 7 registered tools, RequireApproval support
-- Safety framework: path validation, binary detection, null byte checks, bash blocklist (40 patterns), git blocklist (18 commands), timeouts, output limits
-- Multi-turn loop with approval gates + native tool calls in `internal/service/orchestrator.go`
-- Write tool execution: write_file, edit_file, bash, git
-- **Pause/Resume**: Approval gate pauses run; resume starts new goroutine; auto-resume executes approved tools
+- `go test ./...` → All passing (116 test functions across 7 packages)
+  - `internal/service`: 43 tests — orchestrator, batch tool calls, approval gates, concurrent stress
+  - `internal/tool`: 47 tests — 7 registered tools, safety, write execution, blocked commands
+  - `internal/handler`: 9 tests — all handler endpoints
+  - `internal/config`: 11 tests — env helpers, LLM/Tool defaults
+  - `internal/llm`: 10 tests — OpenAI + Fake provider, toolChoice, function calling
+  - `internal/server`: 4 tests — CORS, middleware
+  - `internal/ws`: 0 tests (new package, tested via orchestrator integration)
+- **WebSocket**: New `internal/ws/` package — Hub, Client, Handler — 16 broadcast points in orchestrator
+- LLM interface: `ChatCompletionWithTools` with native function calling + `tool_choice` (none/auto/required)
+- Tool package: 7 tools (list_files, read_file, search_code, write_file, edit_file, bash, git)
+- Safety framework: path validation, binary detection, bash blocklist (40 patterns), git blocklist (18 commands)
+- Multi-turn loop with approval gates + native tool calls
+- **Pause/Resume**: Approval gate pauses run; resume auto-executes approved tools
+- **Concurrent safety**: Atomic DB status transition (proven by 10-goroutine stress test)
 - No new migrations needed
 
 ### Frontend
-- `npm run test:run` → 54 tests passing
-- `npm run lint` → No warnings/errors
+- `npm run test:run` → 143 tests passing (was 133, +10 new WebSocket tests)
+  - `api.test.ts`: 38 tests — all API functions covered
+  - `AgentRunDetail.test.tsx`: 28 tests (+6) — button visibility, loading, error, **WebSocket Live badge, connect/disconnect, polling fallback**
+  - `HumanApprovalsPanel.test.tsx`: 23 tests (+4) — approve/reject, auto-resume, **WebSocket connect/disconnect, polling fallback**
+  - `AgentRunBadges.test.ts`: 30 tests — all format/variant functions
+  - `button.test.tsx`: 7, `badge.test.ts`: 8, `card.test.tsx`: 4, `utils.test.ts`: 5
+- `npm run lint` → No ESLint warnings or errors
 - `npm run build` → Compiles successfully (9 static pages)
-- **Approvals Dashboard**: Approve/Reject buttons, tool input/output display, auto-refresh
+- **WebSocket**: Real-time updates via `useWebSocket` hook with auto-reconnect + polling fallback
+- **Live indicator**: Green "Live" badge when WebSocket is connected
+- **Approvals Dashboard**: Approve/Reject buttons, tool input/output display, auto-refresh via WebSocket
 - **Resume Button**: "▶ Resume Run" button when run is paused
-- **Auto-resume**: Approving/rejecting a tool approval auto-resumes the paused run
 
 ### Database
 - 2 migrations applied:

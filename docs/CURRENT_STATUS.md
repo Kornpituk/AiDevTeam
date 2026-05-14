@@ -262,26 +262,45 @@ The tool package now has 4 write/execution tools:
 - `IsBashCommandAllowed()` — 40 blocked patterns pipeline
 - `IsGitCommandAllowed()` — 18 blocked git commands + subcommand flag analysis
 
+### WebSocket Real-Time Updates (NEW)
+
+- **Backend**: New `internal/ws/` package with Hub (room-based broadcast), Client (connection management), and HTTP upgrade handler
+- **18 broadcast points** in orchestrator: run status, step status, messages, tool calls, approvals all pushed in real-time
+- **WebSocket endpoint**: `GET /ws/agent-runs/{id}` — upgrade to WebSocket, join room `run:{id}`
+- **Frontend**: Custom `useWebSocket` hook with auto-reconnect (exponential backoff 1s→2s→4s→...→30s max)
+- **Polling fallback**: When WebSocket disconnects, falls back to 3-second polling automatically
+- **Live indicator**: Green "Live" badge in AgentRunDetail when WebSocket is connected
+- **Per-component subscriptions**: AgentRunDetail handles `run_update`/`step_update`; HumanApprovalsPanel handles `approval_update`/`tool_call_update`
+
 ### Latest Verification Status
 
-Last verified after Phase C.4 (Pause/Resume):
+Last verified after WebSocket implementation:
 
-- **Backend tests**: `go test ./...` → All passing (128+ test cases)
-  - `internal/tool`: 83 tests
-  - `internal/service`: All passing (15+ tests including pause/resume)
-  - `internal/handler`: All passing (10+ tests including resume handler)
-  - `internal/config`: All passing
-  - `internal/server`: All passing
-- **Frontend tests**: `npm run test:run` → 54 tests passing
+- **Backend tests**: `go test ./...` → All passing (116 test functions)
+  - `internal/ws`: 0 tests (new package, no dedicated tests yet)
+  - `internal/service`: All passing (43 tests)
+  - `internal/tool`: 47 tests (unchanged)
+  - `internal/handler`: 9 tests (unchanged)
+  - `internal/config`: 11 tests (unchanged)
+  - `internal/server`: 4 tests (unchanged)
+  - `internal/llm`: 10 tests (unchanged)
+- **Frontend tests**: `npm run test:run` → 143 tests passing (was 133, +10 new)
+  - `AgentRunDetail.test.tsx`: 28 tests (was 22, +6 WebSocket tests: Live badge visibility, connect/disconnect logic, polling fallback conditions)
+  - `HumanApprovalsPanel.test.tsx`: 23 tests (was 19, +4 WebSocket tests: connect/disconnect, polling fallback)
+  - `api.test.ts`: 38 tests (unchanged)
+  - `AgentRunBadges.test.ts`: 30 tests (unchanged)
 - **Frontend lint**: `npm run lint` → No ESLint warnings or errors
 - **Frontend build**: `npm run build` → Success (9 static pages generated)
-- **Config validation**: `jq empty opencode.json` → Valid JSON
 
 ---
 
 ## What Does NOT Exist Yet
 
-### Not Implemented (Out of Scope for MVP)
+### Implemented (Previously Out of Scope)
+
+- **WebSocket real-time updates** ✅ — Replaced polling with WebSocket push; polling kept as fallback
+
+### Not Implemented (Out of Scope)
 
 - `POST /agent-runs/:id/pause` - Pause execution (handled automatically by orchestrator on approval gate)
 
@@ -292,11 +311,16 @@ Last verified after Phase C.4 (Pause/Resume):
 - **Approvals Dashboard** — ✅ Rich UI with Approve/Reject buttons, tool input as formatted JSON, tool call result correlation, inline error handling
 - **Function-specific `tool_choice`** — only string values supported (`none`/`auto`/`required`); cannot force a specific tool yet
 
-### Limitations (By Design for MVP)
+### Phase C.5 (Completed)
 
-#### No WebSocket Real-time Updates
-- Dashboard uses polling (3-second interval) only while run is `running`
-- No WebSocket or SSE push notifications
+- **LLM Provider edge case tests** — toolChoice none/required, multiple tool calls, context cancellation, zero choices, FakeProvider error paths
+- **Config default/helper tests** — `getEnvInt`, `getEnvInt64`, `getEnvDuration`, `loadEnvFile`, LLM/Tool config defaults
+- **Orchestrator integration tests** — batch tool calls, empty team, multiple approval gates, concurrent stress (10 goroutines), cancel not-in-map, CreateMessage failure resilience
+- **Tool edge case tests** — `ExecuteToolCalls` batch, `FormatToolOutput` marshal error, cherry-pick/pipeto-sh blocked, empty workspace root, negative depth, blocked dirs (dist/build/vendor)
+- **Frontend component tests** — AgentRunDetail button visibility/polling, HumanApprovalsPanel approve/reject/auto-resume, AgentRunBadges all status format/variant functions
+- **Frontend API tests** — resumeAgentRun (happy/404/network), start/cancel error cases, updateHumanApprovalStatus variants
+
+### Limitations (By Design for MVP)
 
 #### No Distributed Queue
 - Execution is in-memory goroutine per run

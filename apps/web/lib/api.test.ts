@@ -19,8 +19,9 @@ import {
   getAgentRuns,
   getAgentRun,
   createAgentRun,
-  startAgentRun,
-  cancelAgentRun,
+   startAgentRun,
+   cancelAgentRun,
+   resumeAgentRun,
   getAgentRunSteps,
   createAgentRunStep,
   updateAgentRunStepStatus,
@@ -548,6 +549,16 @@ const handlers = [
     }
     return HttpResponse.json({ error: "Not found" }, { status: 404 });
   }),
+
+  http.post(`${API_BASE_URL}/agent-runs/:id/resume`, ({ params }) => {
+    const run = mockAgentRuns.find((r) => r.id === params.id);
+    if (run) {
+      return HttpResponse.json({
+        data: { ...run, status: "running" as AgentRunStatus },
+      });
+    }
+    return HttpResponse.json({ error: "Run not found" }, { status: 404 });
+  }),
 ];
 
 const server = setupServer(...handlers);
@@ -858,6 +869,59 @@ describe("API Functions", () => {
     it("updates tool call status", async () => {
       const toolCall = await updateAgentToolCallStatus("tc1", "failed");
       expect(toolCall.status).toBe("failed");
+    });
+  });
+
+  describe("resumeAgentRun", () => {
+    it("resumes a paused agent run", async () => {
+      const run = await resumeAgentRun("r1");
+      expect(run.id).toBe("r1");
+      expect(run.status).toBe("running");
+    });
+
+    it("throws 404 when run not found", async () => {
+      await expect(resumeAgentRun("nonexistent")).rejects.toThrow(
+        "Run not found"
+      );
+    });
+
+    it("throws on network error", async () => {
+      server.use(
+        http.post(`${API_BASE_URL}/agent-runs/:id/resume`, () => {
+          return HttpResponse.error();
+        })
+      );
+      await expect(resumeAgentRun("r1")).rejects.toThrow();
+    });
+  });
+
+  describe("startAgentRun error cases", () => {
+    it("throws 404 when run not found", async () => {
+      await expect(startAgentRun("nonexistent")).rejects.toThrow("Not found");
+    });
+  });
+
+  describe("cancelAgentRun error cases", () => {
+    it("throws 404 when run not found", async () => {
+      await expect(cancelAgentRun("nonexistent")).rejects.toThrow("Not found");
+    });
+  });
+
+  describe("updateHumanApprovalStatus variants", () => {
+    it("approves an approval", async () => {
+      const approval = await updateHumanApprovalStatus("a1", "approved");
+      expect(approval.status).toBe("approved");
+    });
+
+    it("rejects an approval", async () => {
+      const approval = await updateHumanApprovalStatus("a1", "rejected");
+      expect(approval.status).toBe("rejected");
+    });
+
+    it("throws 404 when approval not found", async () => {
+      await expect(
+        updateHumanApprovalStatus("nonexistent", "approved")
+      ).rejects.toThrow("Not found");
     });
   });
 });
