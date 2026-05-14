@@ -136,6 +136,8 @@ func NewServer(cfg *config.Config) *Server {
 		WriteMaxBytes:     cfg.Tool.WriteMaxBytes,
 		BashTimeout:       cfg.Tool.BashTimeout,
 		BashBlocked:       parseBlockedCommands(cfg.Tool.BashBlocked),
+		StepTimeout:       int(cfg.Tool.StepTimeout.Seconds()),
+		RunTimeout:        int(cfg.Tool.RunTimeout.Seconds()),
 	}
 	orchestrator := service.NewOrchestrator(orchestratorRepo, llmProvider, toolOpts)
 

@@ -25,6 +25,8 @@ type ToolConfig struct {
 	WriteMaxBytes     int64
 	BashTimeout       int
 	BashBlocked       string
+	StepTimeout       time.Duration
+	RunTimeout        time.Duration
 }
 
 type DatabaseConfig struct {
@@ -123,6 +125,8 @@ func Load() *Config {
 			WriteMaxBytes:     getEnvInt64("TOOL_WRITE_MAX_BYTES", 1048576), // 1MB
 			BashTimeout:       getEnvInt("TOOL_BASH_TIMEOUT", 30),
 			BashBlocked:       getEnv("TOOL_BASH_BLOCKED_COMMANDS", ""),
+			StepTimeout:       getEnvDuration("STEP_TIMEOUT", 300*time.Second),
+			RunTimeout:        getEnvDuration("RUN_TIMEOUT", 1800*time.Second),
 		},
 	}
 }

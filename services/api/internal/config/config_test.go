@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func TestLoad_Defaults(t *testing.T) {
@@ -74,6 +75,22 @@ func TestLoad_FromEnv(t *testing.T) {
 
 	if cfg.Database.Name != "test-db" {
 		t.Errorf("expected DB Name test-db, got %s", cfg.Database.Name)
+	}
+}
+
+func TestDefaultTimeouts(t *testing.T) {
+	// Unset any env vars that might interfere
+	os.Unsetenv("STEP_TIMEOUT")
+	os.Unsetenv("RUN_TIMEOUT")
+
+	cfg := Load()
+
+	if cfg.Tool.StepTimeout != 300*time.Second {
+		t.Errorf("expected StepTimeout 300s, got %v", cfg.Tool.StepTimeout)
+	}
+
+	if cfg.Tool.RunTimeout != 1800*time.Second {
+		t.Errorf("expected RunTimeout 1800s, got %v", cfg.Tool.RunTimeout)
 	}
 }
 

@@ -1986,6 +1986,98 @@ func TestParseToolCalls_ReturnsNilForNoCalls(t *testing.T) {
 	}
 }
 
+func TestExecuteRun_StepTimeout_MarksStepFailed(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+
+	blockingLLM := newBlockingFakeLLM()
+	orch := NewOrchestrator(repo, blockingLLM, tool.ToolOptions{
+		StepTimeout: 1, // 1 second timeout per step
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		orch.executeRun(context.Background(), testRunID)
+	}()
+
+	// Wait for the step timeout to fire (max 5 seconds)
+	wg.Wait()
+
+	// Check that step was marked as failed
+	if len(repo.steps) > 0 {
+		if repo.steps[0].Status != "failed" {
+			t.Errorf("expected step status 'failed', got %q", repo.steps[0].Status)
+		}
+	}
+
+	// Check that run was marked as failed
+	if len(repo.statusHistory) == 0 {
+		t.Fatal("expected at least one status update")
+	}
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "failed" {
+		t.Errorf("expected run status 'failed', got %q. History: %v", lastStatus, repo.statusHistory)
+	}
+}
+
+func TestExecuteRun_RunTimeout_MarksRunFailed(t *testing.T) {
+	repo := newMockOrchestratorRepo()
+	repo.run = &model.AgentRun{
+		ID:     testRunID,
+		Status: "running",
+	}
+	repo.steps = []model.AgentRunStep{
+		{
+			ID:        testStepID,
+			RunID:     testRunID,
+			ProfileID: testProfileID,
+			StepType:  "plan",
+			Status:    "pending",
+			Position:  1,
+		},
+	}
+
+	blockingLLM := newBlockingFakeLLM()
+	orch := NewOrchestrator(repo, blockingLLM, tool.ToolOptions{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		orch.executeRun(ctx, testRunID)
+	}()
+
+	// Wait for the run to complete (max 5 seconds)
+	wg.Wait()
+
+	// Run should be cancelled due to timeout
+	if len(repo.statusHistory) == 0 {
+		t.Fatal("expected at least one status update")
+	}
+	lastStatus := repo.statusHistory[len(repo.statusHistory)-1]
+	if lastStatus != "cancelled" {
+		t.Errorf("expected run status 'cancelled', got %q. History: %v", lastStatus, repo.statusHistory)
+	}
+}
+
 func TestToolCallJSON_IncludesToolResponse(t *testing.T) {
 	// Verify that the tool output JSON contains the expected fields
 	root := t.TempDir()

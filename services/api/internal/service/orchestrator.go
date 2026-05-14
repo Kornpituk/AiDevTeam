@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/llm"
 	"github.com/Kornpituk/AiDevTeam/services/api/internal/model"
@@ -80,7 +81,9 @@ func (o *Orchestrator) StartRun(_ context.Context, runID string) error {
 		return fmt.Errorf("failed to start run: %w", err)
 	}
 
-	executionCtx, cancel := context.WithCancel(context.Background())
+	var executionCtx context.Context
+	var cancel context.CancelFunc
+	executionCtx, cancel = context.WithTimeout(context.Background(), time.Duration(o.toolOpts.RunTimeout)*time.Second)
 
 	o.mu.Lock()
 	o.running[runID] = cancel
@@ -417,7 +420,19 @@ Review Notes: %s
 				})
 			}
 
-			resp, err := o.llm.ChatCompletionWithTools(ctx, messages, toolDefs, o.toolOpts.ToolChoice)
+			// Apply step-level timeout
+			stepCtx := ctx
+			var stepCancel context.CancelFunc
+			if o.toolOpts.StepTimeout > 0 {
+				stepCtx, stepCancel = context.WithTimeout(ctx, time.Duration(o.toolOpts.StepTimeout)*time.Second)
+			}
+
+			resp, err := o.llm.ChatCompletionWithTools(stepCtx, messages, toolDefs, o.toolOpts.ToolChoice)
+
+			if stepCancel != nil {
+				stepCancel()
+			}
+
 			if err != nil {
 				if ctx.Err() != nil {
 					_, _ = o.repo.UpdateRunStatus(runID, "cancelled")
@@ -589,7 +604,9 @@ func (o *Orchestrator) ResumeRun(ctx context.Context, runID string) error {
 	}
 
 	// Register in running map
-	execCtx, cancel := context.WithCancel(context.Background())
+	var execCtx context.Context
+	var cancel context.CancelFunc
+	execCtx, cancel = context.WithTimeout(context.Background(), time.Duration(o.toolOpts.RunTimeout)*time.Second)
 	o.mu.Lock()
 	if _, exists := o.running[runID]; exists {
 		o.mu.Unlock()

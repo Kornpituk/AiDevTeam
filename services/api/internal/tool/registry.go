@@ -26,6 +26,8 @@ type ToolOptions struct {
 	WriteMaxBytes     int64    // max file size for write/edit
 	BashTimeout       int      // timeout in seconds for bash
 	BashBlocked       []string // additional blocked bash patterns
+	StepTimeout       int      // timeout in seconds for a single step
+	RunTimeout        int      // timeout in seconds for the entire run
 }
 
 // RequiresApproval returns true if the given tool name requires human approval before execution.
